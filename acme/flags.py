@@ -1,14 +1,18 @@
 """Flags: one rule function per assumption, all of them run, all of them shown.
 
 Each rule takes the intent, the result, and the loaded data, and returns a
-`Flag` or `None`. The list itself is what the UI renders, so a caveat lives
-here once instead of as a conditional buried inside a metric.
+`Flag` or `None`. All rules run and all results are collected, because the
+list itself is what the UI renders in the panel without a click, rather than
+being buried as conditionals inside metric code.
 
-Issue 01 ships the two rules the spine's acceptance criteria name: partial
-period and the plain-English metric definitions. The remaining rules named in
-the parent spec (snapshot divergence, stale close date, small sample, missing
-values, unknown stage, invented-rule disclosure) arrive with the tickets that
-first produce the condition they detect.
+Issue 01 shipped partial period and the plain-English metric definitions.
+Issue 05 adds stale close date and missing field, the two rules that catch a
+data-quality problem the sales leader wasn't asking about but needs to know
+regardless. Unknown stage — the loud half of the open-as-complement decision
+— rides along here too, since it needs nothing this issue didn't already add.
+The remaining rules named in the parent spec (snapshot divergence,
+invented-rule disclosure) arrive with the tickets that first produce the
+condition they detect.
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from typing import Callable
 
 from .definitions import definition, title
 from .domain import Flag, Intent, Result
-from .loading import Data
+from .loading import CLOSED_LOST, CLOSED_STAGES, Data
 from .periods import day_of_quarter, days_in_quarter, is_in_progress
 
 Rule = Callable[[Intent, Result, Data], Flag | None]
@@ -72,6 +76,57 @@ def small_sample(intent: Intent, result: Result, data: Data) -> Flag | None:
             f"This answer rests on {count} deal{'s' if count != 1 else ''}, fewer "
             f"than the {SMALL_SAMPLE_THRESHOLD} the system treats as enough to "
             "read as more than one data point."
+        ),
+    )
+
+
+@rule
+def stale_close_date(intent: Intent, result: Result, data: Data) -> Flag | None:
+    """Open deals in the answering snapshot whose forecast close date has
+    already passed as of the as-of date — pipeline that was supposed to have
+    closed by now and hasn't, named so a leader doesn't forecast on it
+    unknowingly. Checked against the whole snapshot that answered the
+    question, not this question's filtered rows, so the caveat holds
+    regardless of which segment, rep, or manager was asked about — the same
+    reason `unknown_stage` reads off `data` rather than the result.
+    """
+    deals = data.deals(result.snapshot)
+    stale = deals[~deals["stage"].isin(CLOSED_STAGES) & (deals["close_date"] <= data.as_of)]
+    if stale.empty:
+        return None
+    names = ", ".join(f"{row.deal_id} ({row.account_name})" for row in stale.itertuples())
+    return Flag(
+        kind="stale_close_date",
+        title="Stale close date",
+        detail=(
+            f"{len(stale)} open deal{'s' if len(stale) != 1 else ''} in the "
+            f"{result.snapshot} snapshot carry a forecast close date at or "
+            f"before {data.as_of} and have not closed: {names}."
+        ),
+    )
+
+
+@rule
+def missing_field(intent: Intent, result: Result, data: Data) -> Flag | None:
+    """Nulls in a field the answer depends on, checked against the whole
+    answering snapshot for the same reason `stale_close_date` is. The only
+    gap of this kind in the dataset today is a missing loss reason on a
+    closed-lost deal, so this checks that field rather than scanning every
+    column for nulls that carry no meaning for the metric being answered."""
+    deals = data.deals(result.snapshot)
+    lost = deals[deals["stage"] == CLOSED_LOST]
+    missing = lost[lost["loss_reason"].isna()]
+    if missing.empty:
+        return None
+    names = ", ".join(f"{row.deal_id} ({row.account_name})" for row in missing.itertuples())
+    verb = "has" if len(missing) == 1 else "have"
+    return Flag(
+        kind="missing_field",
+        title="Missing loss reason",
+        detail=(
+            f"{len(missing)} closed-lost deal{'s' if len(missing) != 1 else ''} "
+            f"in the {result.snapshot} snapshot {verb} no loss reason "
+            f"recorded: {names}."
         ),
     )
 

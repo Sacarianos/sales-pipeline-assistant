@@ -195,4 +195,5 @@ SOURCE_COLUMNS = [
     "deal_value",
     "close_date",
     "period",
+    "loss_reason",
 ]

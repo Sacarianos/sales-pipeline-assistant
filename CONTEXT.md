@@ -33,6 +33,14 @@ exclusion, not a maintained list of open-stage names, since the two snapshots
 use different open-stage vocabularies.
 _Avoid_: pipeline stage, active deal
 
+**Region**:
+Two disagreeing definitions exist in this data: the region recorded on the
+deal itself, and the home region of the rep who owns it. They differ on 17 of
+92 deals in the current snapshot, a count computed at load time rather than
+written by hand. Region questions refuse for this reason rather than picking
+one definition silently; segment carries no equivalent ambiguity.
+_Avoid_: territory, area
+
 **Best case**:
 Closed-won revenue plus open pipeline for a period, both sides filtered to
 the same period by period membership. The ceiling that scope could still

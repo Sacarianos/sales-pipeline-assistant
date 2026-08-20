@@ -1,13 +1,22 @@
 """Turning a question into a structured intent.
 
-Issue 01 ships the offline keyword router only - no language model is called
-anywhere in this file. Issue 03 adds the Anthropic tool-use path in front of it
-and keeps this one as the fallback for when that call fails.
+Issue 01 shipped the offline keyword router. Issue 03 puts the Anthropic
+tool-use router in front of it: tool choice forced to a single tool whose
+input schema is `Intent`'s own JSON schema, enums populated from the catalog.
+The keyword router stays as the fallback for when that call fails, since a
+network outage should degrade a live demo, not crash it.
 
-The keyword router misroutes more often than a model would, and a misroute is
-the one failure the verifier cannot catch, so it refuses when matching is
-ambiguous rather than guessing, and it always populates `restated` so a human
-can spot a wrong reading from the answer alone.
+The router prompt is built entirely from the catalog - metric names,
+descriptions, examples, segments, reps, managers, periods, the as-of date. It
+never receives a data row, so it is structurally incapable of leaking a
+number into the prompt; the no-hallucinated-numbers guarantee rests on what
+the model was never shown, not on prompt wording.
+
+Region questions are refused before either router runs. `Intent` has no field
+for region, so the one wrong move available to a model asked about it is
+substituting the nearest segment or rep - a substitution validation can't
+catch, since the substituted value would be a real one. Catching it here,
+ahead of both routers, means it can't happen regardless of which one answers.
 """
 
 from __future__ import annotations
@@ -17,6 +26,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from .catalog import Catalog
+from .config import ROUTER_MODEL
 from .domain import UNSUPPORTED, Intent
 from .periods import period_of
 
@@ -95,6 +105,11 @@ def _match_metric(question: str, catalog: Catalog) -> tuple[str | None, str | No
     return winners[0], None
 
 
+def _current_period(catalog: Catalog) -> str:
+    """The period `as_of` falls in - the ADR-0005 default for a bare question."""
+    return period_of(catalog.as_of) or catalog.periods[-1]
+
+
 def _match_period(question: str, catalog: Catalog) -> tuple[str, bool]:
     """The period, and whether the restatement owes the reader a caveat.
 
@@ -108,7 +123,7 @@ def _match_period(question: str, catalog: Catalog) -> tuple[str, bool]:
         if re.search(pattern, lowered) and period in catalog.periods:
             return period, False
 
-    current = period_of(catalog.as_of) or catalog.periods[-1]
+    current = _current_period(catalog)
     if re.search(CURRENT_PERIOD_PATTERN, lowered):
         return current, True
     if re.search(LAST_PERIOD_PATTERN, lowered):
@@ -187,6 +202,43 @@ def restate(
     return sentence + "."
 
 
+REGION_WORD_PATTERN = r"\bregions?\b"
+
+
+def _mentions_region(question: str, catalog: Catalog) -> bool:
+    lowered = question.lower()
+    if re.search(REGION_WORD_PATTERN, lowered):
+        return True
+    return any(
+        re.search(rf"\b{re.escape(region.lower())}\b", lowered)
+        for region in catalog.regions
+    )
+
+
+def _region_intent(question: str, catalog: Catalog) -> Intent:
+    """Refuse a region question before either router runs.
+
+    Reuses `_match_period` so a region refusal still names an assumed quarter
+    the same way any other restatement would, rather than skipping the ADR-0005
+    caveat just because the question is being refused.
+    """
+    period, defaulted = _match_period(question, catalog)
+    sentence = f"Reading this as a question about region for {period}"
+    if defaulted:
+        sentence += (
+            ", the quarter containing the as-of date, "
+            "since the question named no quarter"
+        )
+    sentence += ", which this system refuses to answer."
+    return Intent(
+        metric=UNSUPPORTED,
+        grouping="overall",
+        period=period,
+        restated=sentence,
+        unsupported_reason=catalog.region_refusal_reason(),
+    )
+
+
 def route_offline(question: str, catalog: Catalog) -> Intent:
     """Keyword routing. Refuses rather than guesses when nothing matches."""
     period, defaulted = _match_period(question, catalog)
@@ -228,10 +280,110 @@ def route_offline(question: str, catalog: Catalog) -> Intent:
     )
 
 
-def route(question: str, catalog: Catalog, client: object | None = None) -> Routing:
-    """Route a question, offline for now.
+TOOL_NAME = "route_question"
 
-    The signature takes a client because issue 03 adds the Anthropic tool-use
-    router in front of the keyword path and falls back to this one on failure.
+
+def _tool_schema(catalog: Catalog) -> dict:
+    """`Intent`'s own JSON schema, with enums populated from the catalog.
+
+    Forcing tool choice to this schema is what makes the model structurally
+    unable to answer with free-form JSON in a text reply, and populating the
+    enums from the catalog is what makes it structurally unable to name a
+    metric, segment, rep, manager, or period the system doesn't have.
     """
+    schema = Intent.model_json_schema()
+    props = schema["properties"]
+    props["metric"]["enum"] = [*catalog.metric_names(), UNSUPPORTED]
+    props["grouping"]["enum"] = list(catalog.groupings)
+    props["period"]["enum"] = list(catalog.periods)
+    for field, values in (
+        ("comparison_period", catalog.periods),
+        ("segment", catalog.segments),
+        ("rep", catalog.reps),
+        ("manager", catalog.managers),
+    ):
+        props[field]["anyOf"][0]["enum"] = list(values)
+    return schema
+
+
+def _system_prompt(catalog: Catalog) -> str:
+    """Everything the model gets: catalog metadata, never a data row.
+
+    Column names and the distinct values of low-cardinality columns (segment,
+    rep, manager, period) are here. No deal, no dollar figure, no account
+    name - the router is structurally incapable of leaking a number into the
+    prompt because none was ever put in it.
+    """
+    metrics = "\n".join(
+        f"- {spec.name} (answers at: {', '.join(spec.groupings)}): {spec.description}\n"
+        + "\n".join(f'    e.g. "{example}"' for example in spec.examples)
+        for spec in catalog.metrics
+    )
+    return (
+        "You route a sales leader's question about pipeline into a structured "
+        "intent by calling the route_question tool. You never see any deal-level "
+        "data - only this catalog of what the system can answer.\n\n"
+        f"Metrics:\n{metrics}\n\n"
+        f"Segments: {', '.join(catalog.segments)}\n"
+        f"Reps: {', '.join(catalog.reps)}\n"
+        f"Managers: {', '.join(catalog.managers)}\n"
+        f"Periods: {', '.join(catalog.periods)}\n"
+        f"As-of date: {catalog.as_of}\n\n"
+        "Rules:\n"
+        f"- If the question names no quarter, default period to "
+        f"{_current_period(catalog)}, the quarter containing the as-of date, and "
+        "say so explicitly in `restated` - a wrong default has to be as visible "
+        "as a wrong metric.\n"
+        "- If the question needs a metric, segment, or rep outside the lists "
+        "above, or asks about something this catalog doesn't cover, set metric "
+        "to 'unsupported' and explain why in `unsupported_reason`. Never "
+        "substitute the closest match - refusing is cheap, a wrong route is "
+        "expensive.\n"
+        "- `restated` is one sentence restating how you read the question. It "
+        "renders directly to the user, so a wrong reading has to be visible in "
+        "it alone.\n"
+    )
+
+
+def route_online(question: str, catalog: Catalog, client: object) -> Routing:
+    """The Anthropic tool-use router: tool choice forced to the one tool."""
+    message = client.messages.create(
+        model=ROUTER_MODEL,
+        max_tokens=1024,
+        system=_system_prompt(catalog),
+        tools=[
+            {
+                "name": TOOL_NAME,
+                "description": (
+                    "Record the structured reading of the sales leader's question."
+                ),
+                "input_schema": _tool_schema(catalog),
+            }
+        ],
+        tool_choice={"type": "tool", "name": TOOL_NAME},
+        messages=[{"role": "user", "content": question}],
+    )
+    block = next(b for b in message.content if getattr(b, "type", None) == "tool_use")
+    return Routing(intent=Intent(**block.input), mode="online")
+
+
+def route(question: str, catalog: Catalog, client: object | None = None) -> Routing:
+    """Route online with the model, falling back to the offline keyword router.
+
+    Region is checked before either router runs and short-circuits both,
+    since `Intent` has no field to hold a region and the one wrong move
+    available to a model asked about it is silently substituting the nearest
+    segment or rep - a substitution validation has no way to catch, because
+    the substituted value would be a real one.
+    """
+    if _mentions_region(question, catalog):
+        mode: Mode = "online" if client is not None else "offline"
+        return Routing(intent=_region_intent(question, catalog), mode=mode)
+
+    if client is not None:
+        try:
+            return route_online(question, catalog, client)
+        except Exception:
+            pass
+
     return Routing(intent=route_offline(question, catalog), mode="offline")

@@ -26,8 +26,11 @@ class Catalog:
     segments: tuple[str, ...]
     reps: tuple[str, ...]
     managers: tuple[str, ...]
+    regions: tuple[str, ...]
     periods: tuple[str, ...]
     as_of: date
+    region_mismatch_count: int
+    region_deal_count: int
 
     def metric_names(self) -> tuple[str, ...]:
         return tuple(spec.name for spec in self.metrics)
@@ -55,6 +58,17 @@ class Catalog:
             f"as of {self.as_of}."
         )
 
+    def region_refusal_reason(self) -> str:
+        """Why region questions refuse, computed from the loaded data rather
+        than quoted from a written string, so the number can't go stale."""
+        return (
+            "Region is out of scope: two definitions of region disagree in this "
+            "data. Each deal carries its own region, and the rep who owns it "
+            "carries a separate home region, and the two differ on "
+            f"{self.region_mismatch_count} of {self.region_deal_count} deals in "
+            "the current snapshot. Ask about segment, rep, or manager instead."
+        )
+
 
 def _ordered(values) -> tuple[str, ...]:
     return tuple(sorted({str(v) for v in values if str(v) != "nan"}))
@@ -74,6 +88,9 @@ def build_catalog(data: Data) -> Catalog:
         segments=_ordered(data.reps["segment"]),
         reps=_ordered(data.reps["rep_name"]),
         managers=_ordered(data.reps["manager"]),
+        regions=_ordered(data.reps["region"]),
         periods=PERIODS,
         as_of=data.as_of,
+        region_mismatch_count=data.region_mismatch_count,
+        region_deal_count=data.region_deal_count,
     )

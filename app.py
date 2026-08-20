@@ -9,8 +9,10 @@ because it is the only backstop against a silent misroute.
 
 from __future__ import annotations
 
+import anthropic
 import streamlit as st
 
+from acme import config
 from acme.domain import Answered, Refused
 from acme.loading import load_data
 from acme.pipeline import ask
@@ -23,7 +25,18 @@ def get_data():
     return load_data()
 
 
+@st.cache_resource
+def get_client() -> anthropic.Anthropic | None:
+    """None when the API key is missing, so routing falls back offline instead
+    of crashing the app at startup."""
+    try:
+        return anthropic.Anthropic()
+    except Exception:
+        return None
+
+
 data = get_data()
+client = get_client()
 
 if "history" not in st.session_state:
     st.session_state.history = []  # list of (question, Answer)
@@ -32,23 +45,32 @@ chat_col, panel_col = st.columns([3, 2])
 
 with chat_col:
     st.title("Acme pipeline assistant")
-    st.caption(f"As of {data.as_of}. No question here reaches a language model in this build.")
+    st.caption(
+        f"As of {data.as_of}. Questions route through {config.ROUTER_MODEL}, "
+        "falling back to an offline keyword router if the model is unreachable."
+    )
 
     for question, answer in st.session_state.history:
         with st.chat_message("user"):
             st.write(question)
         with st.chat_message("assistant"):
+            if answer.router_mode == "offline":
+                st.warning(
+                    "Offline routing: the model API was unreachable, so the "
+                    "keyword router answered this one. Double-check the "
+                    "restatement below."
+                )
             if isinstance(answer, Refused):
                 st.warning(f"I can't answer that: {answer.reason}")
                 st.caption(answer.hint)
+                if answer.intent is not None:
+                    st.caption(answer.intent.restated)
             else:
-                if answer.router_mode == "offline":
-                    st.caption("Routed offline — the keyword router answered this one.")
                 st.write(answer.prose)
 
     question = st.chat_input("Ask about pipeline, e.g. \"how are we tracking this quarter\"")
     if question:
-        answer = ask(question, data)
+        answer = ask(question, data, client)
         st.session_state.history.append((question, answer))
         st.rerun()
 

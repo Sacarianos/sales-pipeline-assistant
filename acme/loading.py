@@ -14,7 +14,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import config
-from .periods import PERIODS, period_of
+from .periods import PERIODS, period_of, snapshot_for
 
 CLOSED_WON = "Closed Won"
 CLOSED_LOST = "Closed Lost"
@@ -48,6 +48,8 @@ class Data:
     reps: pd.DataFrame
     unknown_stages: tuple[str, ...]
     as_of: date
+    region_mismatch_count: int
+    region_deal_count: int
 
     def deals(self, snapshot: str) -> pd.DataFrame:
         return self.snapshots[snapshot]
@@ -127,12 +129,23 @@ def load_data(
         snapshots[name] = frame
         unknown |= unknown_here
 
+    # Two definitions of region live in this data: the deal's own `region`
+    # column and the `region` on the rep who owns it. They disagree on some
+    # deals, which is the whole reason region questions are refused. Counted
+    # here, from the current snapshot, so the refusal quotes a number the
+    # loader just computed rather than one typed into a string by hand.
+    current = snapshots[snapshot_for(PERIODS[-1])]
+    region_mismatch_count = int((current["region"] != current["rep_region"]).sum())
+    region_deal_count = int(len(current))
+
     return Data(
         snapshots=snapshots,
         quotas=quotas,
         reps=reps,
         unknown_stages=tuple(sorted(unknown)),
         as_of=as_of,
+        region_mismatch_count=region_mismatch_count,
+        region_deal_count=region_deal_count,
     )
 
 

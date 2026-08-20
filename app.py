@@ -67,6 +67,10 @@ with chat_col:
                     st.caption(answer.intent.restated)
             else:
                 st.write(answer.prose)
+                if answer.prose_source == "narrator":
+                    st.caption(f"{answer.verified_figures} figures verified against computed values")
+                elif answer.narrator_blocked:
+                    st.caption("Model output blocked: a figure didn't verify. Showing the computed sentence instead.")
 
     question = st.chat_input("Ask about pipeline, e.g. \"how are we tracking this quarter\"")
     if question:

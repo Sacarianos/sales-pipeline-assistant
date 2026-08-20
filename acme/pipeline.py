@@ -12,6 +12,7 @@ from .catalog import Catalog, build_catalog
 from .domain import Answer, Answered, Refused
 from .flags import evaluate as evaluate_flags
 from .loading import Data
+from .narrator import narrate
 from .registry import MetricRequest
 from .router import route
 from .validation import validate
@@ -38,14 +39,17 @@ def ask(question: str, data: Data, client: object | None = None) -> Answer:
 
     flags = evaluate_flags(intent, result, data)
 
-    # Issue 04 replaces this with the narrator's prose plus verification.
-    # The template sentence is the deterministic fallback every result
-    # carries, so the spine has something correct to show before the model
-    # is in the loop at all.
+    # The narrator sees the question, the restatement, and the facts —
+    # nothing else. Its prose is verified against those same facts before
+    # publishing; a blocked or failed narration falls back to the
+    # deterministic template every result carries.
+    narration = narrate(question, intent.restated, result.facts, result.template, client)
+
     return Answered(
-        prose=result.template,
-        prose_source="template",
-        verified_figures=None,
+        prose=narration.prose,
+        prose_source=narration.source,
+        verified_figures=narration.verified_figures,
+        narrator_blocked=narration.blocked,
         facts=result.facts,
         flags=flags,
         table=result.table,

@@ -97,9 +97,13 @@ class Answered:
 
     kind: Literal["answered"] = field(default="answered", init=False)
     prose: str = ""
-    # "template" until the narrator arrives in issue 04.
     prose_source: Literal["narrator", "template"] = "template"
     verified_figures: int | None = None
+    # True when the template is on screen because narration was attempted and
+    # blocked — an API failure/timeout or a verification failure — rather
+    # than because narration was never attempted (no client). Drives the
+    # "blocked" badge, distinct from having no badge at all.
+    narrator_blocked: bool = False
     facts: dict[str, Fact] = field(default_factory=dict)
     flags: tuple[Flag, ...] = ()
     table: pd.DataFrame = field(default_factory=pd.DataFrame)

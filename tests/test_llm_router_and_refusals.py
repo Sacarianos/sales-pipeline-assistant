@@ -63,10 +63,12 @@ def _attainment_input(**overrides) -> dict:
 
 
 def test_routing_forces_tool_choice_to_the_single_query_tool(data):
+    # The client also fields the narrator's call once routing succeeds, per
+    # ADR/issue 04 - "the model is used exactly twice" - so this checks the
+    # router's own call (the first one) rather than the full call count.
     client = StubRouterClient(tool_input=_attainment_input())
     ask("how are we tracking this quarter", data, client)
 
-    assert len(client.calls) == 1
     call = client.calls[0]
     assert len(call["tools"]) == 1
     tool_name = call["tools"][0]["name"]

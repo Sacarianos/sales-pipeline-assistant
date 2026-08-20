@@ -26,6 +26,30 @@ def _rep_row(data: Data, rep_name: str):
     return matches.iloc[0] if len(matches) else None
 
 
+def _implied_segment_and_manager(
+    data: Data, kind: str, value: str
+) -> tuple[str | None, str | None]:
+    """What (segment, manager) pair a single filter value implies.
+
+    Resolved through the rep-to-segment and rep-to-manager lookup in the quota
+    source (`data.reps`), which is what lets one rule cover all three filters
+    instead of three near-duplicate checks. A side left `None` means that
+    filter alone doesn't pin it down — a segment implies no manager if it maps
+    to more than one, which never happens in this data but costs nothing to
+    handle. Callers must already know `value` is in the catalog: `validate`
+    checks rep/segment/manager membership before this ever runs.
+    """
+    if kind == "rep":
+        row = _rep_row(data, value)
+        assert row is not None
+        return row["segment"], row["manager"]
+    if kind == "segment":
+        managers = set(data.reps.loc[data.reps["segment"] == value, "manager"])
+        return value, managers.pop() if len(managers) == 1 else None
+    segments = set(data.reps.loc[data.reps["manager"] == value, "segment"])
+    return (segments.pop() if len(segments) == 1 else None), value
+
+
 def check_filter_agreement(intent: Intent, data: Data) -> ValidationError | None:
     """One rule over any pair among rep, segment, and manager.
 
@@ -34,32 +58,30 @@ def check_filter_agreement(intent: Intent, data: Data) -> ValidationError | None
     wrong segment. Silently dropping one of two conflicting filters would
     answer a different question than the one asked, so this refuses instead.
     """
-    if not intent.rep:
-        if intent.segment and intent.manager:
-            seg_managers = set(
-                data.reps.loc[data.reps["segment"] == intent.segment, "manager"]
-            )
-            if intent.manager not in seg_managers:
+    named = [
+        (kind, value)
+        for kind, value in (("rep", intent.rep), ("segment", intent.segment), ("manager", intent.manager))
+        if value
+    ]
+    resolved = [
+        (kind, value, _implied_segment_and_manager(data, kind, value))
+        for kind, value in named
+    ]
+
+    for i, (kind_a, value_a, (seg_a, mgr_a)) in enumerate(resolved):
+        for kind_b, value_b, (seg_b, mgr_b) in resolved[i + 1 :]:
+            if seg_a is not None and seg_b is not None and seg_a != seg_b:
                 return ValidationError(
-                    f"manager '{intent.manager}' does not manage the "
-                    f"'{intent.segment}' segment"
+                    f"{kind_a} '{value_a}' and {kind_b} '{value_b}' disagree: "
+                    f"{kind_a} '{value_a}' implies the '{seg_a}' segment, "
+                    f"{kind_b} '{value_b}' implies the '{seg_b}' segment"
                 )
-        return None
-
-    rep_row = _rep_row(data, intent.rep)
-    if rep_row is None:
-        return ValidationError(f"rep '{intent.rep}' is not in the catalog")
-
-    if intent.segment and rep_row["segment"] != intent.segment:
-        return ValidationError(
-            f"rep '{intent.rep}' belongs to the '{rep_row['segment']}' segment, "
-            f"not '{intent.segment}'"
-        )
-    if intent.manager and rep_row["manager"] != intent.manager:
-        return ValidationError(
-            f"rep '{intent.rep}' reports to '{rep_row['manager']}', "
-            f"not '{intent.manager}'"
-        )
+            if mgr_a is not None and mgr_b is not None and mgr_a != mgr_b:
+                return ValidationError(
+                    f"{kind_a} '{value_a}' and {kind_b} '{value_b}' disagree: "
+                    f"{kind_a} '{value_a}' implies manager '{mgr_a}', "
+                    f"{kind_b} '{value_b}' implies manager '{mgr_b}'"
+                )
     return None
 
 

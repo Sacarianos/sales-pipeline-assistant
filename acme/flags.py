@@ -51,6 +51,31 @@ def partial_period(intent: Intent, result: Result, data: Data) -> Flag | None:
     )
 
 
+SMALL_SAMPLE_THRESHOLD = 5
+
+
+@rule
+def small_sample(intent: Intent, result: Result, data: Data) -> Flag | None:
+    """A headline number resting on very few deals, first seen at rep grouping.
+
+    Grouping down to a single rep is the first thing in the system that can
+    produce a headline number behind only a handful of rows, so the count
+    checked here is the same row count the source-rows panel shows.
+    """
+    count = len(result.source_rows)
+    if count >= SMALL_SAMPLE_THRESHOLD:
+        return None
+    return Flag(
+        kind="small_sample",
+        title="Small sample",
+        detail=(
+            f"This answer rests on {count} deal{'s' if count != 1 else ''}, fewer "
+            f"than the {SMALL_SAMPLE_THRESHOLD} the system treats as enough to "
+            "read as more than one data point."
+        ),
+    )
+
+
 @rule
 def unknown_stage(intent: Intent, result: Result, data: Data) -> Flag | None:
     if not data.unknown_stages:

@@ -27,6 +27,19 @@ DEFINITIONS: dict[str, str] = {
         "Quotas come from data/Q2/reps.csv for both quarters, one figure per rep "
         "per quarter."
     ),
+    "best_case": (
+        "Best case is closed-won revenue plus all open pipeline for the period, "
+        "as if every open deal closes. It answers a different question than "
+        "attainment does: not what has been won, but the most this period could "
+        "possibly become, and it is never folded into the attainment percentage."
+    ),
+    "win_rate_weighted": (
+        "Win-rate-weighted pipeline scales open pipeline by the period's win rate "
+        "by value — closed-won revenue divided by all closed revenue, won and "
+        "lost — rather than assuming every open deal closes. It is a second, more "
+        "conservative estimate alongside best case, not a replacement for either "
+        "attainment or best case."
+    ),
 }
 
 

@@ -136,8 +136,22 @@ def load_data(
     )
 
 
-def quota_total(quotas: pd.DataFrame, period: str) -> float:
-    return float(quotas.loc[quotas["period"] == period, "quota"].sum())
+def quota_total(
+    quotas: pd.DataFrame,
+    period: str,
+    *,
+    segment: str | None = None,
+    rep: str | None = None,
+    manager: str | None = None,
+) -> float:
+    scoped = quotas[quotas["period"] == period]
+    if segment:
+        scoped = scoped[scoped["segment"] == segment]
+    if manager:
+        scoped = scoped[scoped["manager"] == manager]
+    if rep:
+        scoped = scoped[scoped["rep_name"] == rep]
+    return float(scoped["quota"].sum())
 
 
 __all__ = [

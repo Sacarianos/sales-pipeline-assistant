@@ -33,12 +33,28 @@ exclusion, not a maintained list of open-stage names, since the two snapshots
 use different open-stage vocabularies.
 _Avoid_: pipeline stage, active deal
 
-**Best-case coverage**:
-Closed-won revenue plus open pipeline, compared against quota, both sides
-filtered to the same period by period membership. The ceiling a rep could
-still reach this quarter, not a probability-weighted forecast and not a
-count of every open deal a rep has regardless of when it's slated to close.
+**Best case**:
+Closed-won revenue plus open pipeline for a period, both sides filtered to
+the same period by period membership. The ceiling that scope could still
+reach, not a probability-weighted forecast. Reported as its own currency
+Fact alongside attainment, never folded into it. Divided by quota, this is
+best-case coverage.
 _Avoid_: pipeline coverage, forecast
+
+**Best-case coverage**:
+Best case (above) compared against quota, per rep. The ceiling a rep could
+still reach this quarter, not a count of every open deal a rep has
+regardless of when it's slated to close. Anyone below 100 percent cannot
+make quota even if every open deal they have closes.
+_Avoid_: pace, on-pace
+
+**Win-rate-weighted pipeline**:
+Closed-won revenue plus open pipeline scaled by the period's win rate by
+value — closed-won divided by all closed revenue, won and lost — rather
+than assuming every open deal closes. A second, more conservative estimate
+alongside best case, reported as its own Fact and never folded into
+attainment.
+_Avoid_: weighted forecast, expected pipeline
 
 **ID reuse**:
 A `deal_id` that refers to two different deals across snapshots — detected

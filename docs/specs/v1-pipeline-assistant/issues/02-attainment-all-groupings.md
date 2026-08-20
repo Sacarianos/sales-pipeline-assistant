@@ -29,21 +29,35 @@ first thing that produces a headline number resting on very few deals.
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
-- [ ] Enterprise this quarter returns 165,000 closed, a 3,650,000 quota, 4.5
+- [x] Enterprise this quarter returns 165,000 closed, a 3,650,000 quota, 4.5
       percent, and 3,600,000 open
-- [ ] Attainment answers at overall, segment, rep, and manager groupings
-- [ ] Open pipeline is excluded from the attainment figure and present as its own
+- [x] Attainment answers at overall, segment, rep, and manager groupings
+- [x] Open pipeline is excluded from the attainment figure and present as its own
       named fact
-- [ ] Best-case and win-rate-weighted figures exist as separate named facts
-- [ ] A rep paired with a segment they don't belong to returns a refusal naming
+- [x] Best-case and win-rate-weighted figures exist as separate named facts
+- [x] A rep paired with a segment they don't belong to returns a refusal naming
       both filters
-- [ ] A manager paired with a conflicting segment returns the same shape of
+- [x] A manager paired with a conflicting segment returns the same shape of
       refusal
-- [ ] A manager paired with a rep they don't manage returns the same shape of
+- [x] A manager paired with a rep they don't manage returns the same shape of
       refusal
-- [ ] Filter agreement is one rule covering all three pairs, not three
+- [x] Filter agreement is one rule covering all three pairs, not three
       near-duplicate checks
-- [ ] A headline number resting on fewer than five deals raises the small-sample
+- [x] A headline number resting on fewer than five deals raises the small-sample
       flag
+
+**Implementation notes:** `acme/metrics/attainment.py` scopes closed-won,
+quota, open pipeline, best case, and win-rate-weighted to whichever of
+segment, rep, or manager the intent named; `acme/validation.py`'s
+`check_filter_agreement` resolves any of the three filters to an implied
+(segment, manager) pair through `data.reps` and checks every set filter
+pairwise, so one function covers all three conflicting-pair cases; the
+small-sample rule lives in `acme/flags.py`, keyed off `len(source_rows)`.
+`CONTEXT.md` gained entries for best case, best-case coverage (disambiguated
+from the new best-case fact, reserved for issue 07's risk metric), and
+win-rate-weighted pipeline. 15 tests in `tests/test_attainment_all_groupings.py`,
+27 passing overall. Reviewed via `/code-review` on both axes; both came back
+clean after two fixes made in response (the CONTEXT.md disambiguation above,
+and removing a dead-code branch in the filter-agreement helper).

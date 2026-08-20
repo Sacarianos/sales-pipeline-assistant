@@ -1,0 +1,37 @@
+# 09: Demo readiness
+
+**Parent:** [V1 Acme pipeline assistant](../../v1-pipeline-assistant.md)
+
+**What to build:** The whole thing runs as a demo for a skeptical audience. All
+five acceptance cases pass end to end against the real models, the sidebar
+suggests questions the system can actually answer, and the README makes the trust
+argument in the form someone can read in two minutes.
+
+The sidebar example questions come from the catalog rather than a hardcoded list,
+same as the refusal message. A hardcoded example that drifts out of sync with the
+registry is a demo failure waiting to happen, and wiring it to the catalog is
+also part of proving the one-file extensibility claim.
+
+The README covers why the language model never produces a number, how the two
+model calls are fenced, what the verifier does when it catches something, and how
+to add a metric by editing one file. That last part gets a worked example, since
+showing the diff during a walkthrough is a stated goal and a diff that has to be
+improvised on the day is not a diff worth showing.
+
+**Blocked by:** 02, 03, 04, 05, 06, 07, 08
+
+**Status:** ready-for-agent
+
+- [ ] Enterprise tracking against quota this quarter answers correctly end to end
+      with prose and a verified badge
+- [ ] Which reps are at risk of missing Q2 answers correctly end to end
+- [ ] How Q2 compares to the same point in Q1 answers correctly end to end
+- [ ] The West region question refuses with its computed conflict count
+- [ ] The Slack sentiment question refuses with the catalog coverage list
+- [ ] Sidebar example questions are read from the catalog
+- [ ] The README explains the trust argument, the architecture, and the two
+      fenced model calls
+- [ ] The README carries a worked example of adding a metric in one file
+- [ ] The router uses `claude-sonnet-5` and the narrator uses
+      `claude-haiku-4-5-20251001`, both from a configuration constant
+- [ ] The app runs from a clean checkout with documented setup steps

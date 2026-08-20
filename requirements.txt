@@ -1,0 +1,5 @@
+anthropic
+pandas
+pydantic
+streamlit
+pytest

@@ -10,9 +10,11 @@ Issue 05 adds stale close date and missing field, the two rules that catch a
 data-quality problem the sales leader wasn't asking about but needs to know
 regardless. Unknown stage — the loud half of the open-as-complement decision
 — rides along here too, since it needs nothing this issue didn't already add.
-The remaining rules named in the parent spec (snapshot divergence,
-invented-rule disclosure) arrive with the tickets that first produce the
-condition they detect.
+
+Issue 06 adds snapshot divergence and changed deals, both reading the change
+log the loader now diffs at load time. Issue 07 adds the invented-rule
+disclosure for risk, so nobody repeats the 100 percent threshold as a
+Acme standard.
 """
 
 from __future__ import annotations
@@ -127,6 +129,83 @@ def missing_field(intent: Intent, result: Result, data: Data) -> Flag | None:
             f"{len(missing)} closed-lost deal{'s' if len(missing) != 1 else ''} "
             f"in the {result.snapshot} snapshot {verb} no loss reason "
             f"recorded: {names}."
+        ),
+    )
+
+
+@rule
+def snapshot_divergence(intent: Intent, result: Result, data: Data) -> Flag | None:
+    """Q1 as-reported versus restated, decomposed into what actually
+    changed. Only fires at the overall grouping: the decomposition counts
+    and values describe the whole Q1 portfolio, and would misdescribe a
+    segment- or rep-scoped answer that only restates its own slice.
+    """
+    if "restated_closed_won" not in result.facts or intent.grouping != "overall":
+        return None
+    as_reported = result.facts["closed_won"].value
+    restated = result.facts["restated_closed_won"].value
+    gap = as_reported - restated
+    if abs(gap) < 1:
+        return None
+
+    div = data.divergence
+    return Flag(
+        kind="snapshot_divergence",
+        title="Q1 as-reported versus restated",
+        detail=(
+            f"As-reported Q1 closed-won is {as_reported:,.0f}; restated from the "
+            f"Q2 snapshot it is {restated:,.0f}, a gap of {gap:,.0f}. Of that gap, "
+            f"{div.unwon_count} deal{'s' if div.unwon_count != 1 else ''} worth "
+            f"{div.unwon_value:,.0f} genuinely came unwon, and "
+            f"{div.reused_unwon_count} deal ID{'s' if div.reused_unwon_count != 1 else ''} "
+            f"worth {div.reused_unwon_value:,.0f} were reused by a different account and "
+            "were never unwon at all. The remainder is deals whose close date moved "
+            "across the quarter boundary between snapshots."
+        ),
+    )
+
+
+@rule
+def changed_deals(intent: Intent, result: Result, data: Data) -> Flag | None:
+    """Deals in this answer's own source rows that differ between the two
+    snapshots, so a leader who remembers a different figure for a deal they
+    know understands why before assuming the tool is wrong."""
+    if result.source_rows.empty or data.change_log.empty:
+        return None
+    present = set(result.source_rows["deal_id"]) & set(data.change_log["deal_id"])
+    if not present:
+        return None
+    by_deal = data.change_log[data.change_log["deal_id"].isin(present)].drop_duplicates("deal_id")
+    names = ", ".join(
+        f"{row.deal_id} ({row.change_type})" for row in by_deal.sort_values("deal_id").itertuples()
+    )
+    return Flag(
+        kind="changed_deals",
+        title="Deals changed between snapshots",
+        detail=(
+            f"{len(present)} deal{'s' if len(present) != 1 else ''} in this answer's "
+            f"source rows changed between the Q1 and Q2 snapshots: {names}."
+        ),
+    )
+
+
+@rule
+def invented_risk_rule(intent: Intent, result: Result, data: Data) -> Flag | None:
+    """Discloses that the 100 percent best-case threshold is this system's
+    own invention, not a Acme standard — and that pace was explicitly
+    rejected as the underlying rule, since at day 32 of a young quarter
+    pace would flag nearly everyone."""
+    if intent.metric != "risk":
+        return None
+    return Flag(
+        kind="invented_rule",
+        title="Invented threshold",
+        detail=(
+            "Below 100 percent best-case coverage is a threshold this system "
+            "invented for this analysis, not a Acme standard. A pace-based "
+            "rule was rejected on purpose: early in a quarter, most reps have "
+            "closed nothing yet, and pace would flag nearly everyone without "
+            "telling a leader anything they could act on."
         ),
     )
 

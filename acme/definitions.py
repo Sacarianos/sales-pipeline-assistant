@@ -40,6 +40,19 @@ DEFINITIONS: dict[str, str] = {
         "conservative estimate alongside best case, not a replacement for either "
         "attainment or best case."
     ),
+    "restated": (
+        "The restated figure recomputes a Q1 number from the Q2 snapshot, showing "
+        "what those Q1 deals look like now that reopenings, unwinds, and ID reuse "
+        "have come to light. As-reported is what the business committed to at the "
+        "time; restated is what the current data supports. The two are never "
+        "blended into one number."
+    ),
+    "best_case_coverage": (
+        "Best-case coverage is best case — closed-won plus open pipeline — "
+        "divided by quota, per rep. It answers whether a rep can still make "
+        "quota this quarter if every open deal they have closes. Below 100 "
+        "percent means they cannot, even in that best case."
+    ),
 }
 
 

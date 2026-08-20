@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from .catalog import Catalog
 from .domain import UNSUPPORTED, Intent
 from .loading import Data
+from .periods import is_in_progress
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,13 @@ def validate(intent: Intent, catalog: Catalog, data: Data) -> ValidationError | 
     if not spec.supports(intent.grouping):
         return ValidationError(
             f"'{intent.metric}' does not answer at the '{intent.grouping}' grouping"
+        )
+
+    if intent.metric == "risk" and not is_in_progress(intent.period, data.as_of):
+        return ValidationError(
+            f"risk is a best-case read on a quarter still in progress; "
+            f"{intent.period} is not in progress as of {data.as_of}, so there is "
+            "nothing left that could still close"
         )
 
     if intent.segment and intent.segment not in catalog.segments:

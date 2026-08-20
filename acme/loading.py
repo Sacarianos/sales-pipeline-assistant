@@ -15,6 +15,7 @@ import pandas as pd
 
 from . import config
 from .periods import PERIODS, period_of, snapshot_for
+from .reconciler import Divergence, divergence as _divergence, reconcile
 
 CLOSED_WON = "Closed Won"
 CLOSED_LOST = "Closed Lost"
@@ -50,6 +51,8 @@ class Data:
     as_of: date
     region_mismatch_count: int
     region_deal_count: int
+    change_log: pd.DataFrame
+    divergence: Divergence
 
     def deals(self, snapshot: str) -> pd.DataFrame:
         return self.snapshots[snapshot]
@@ -138,6 +141,9 @@ def load_data(
     region_mismatch_count = int((current["region"] != current["rep_region"]).sum())
     region_deal_count = int(len(current))
 
+    change_log = reconcile(snapshots["Q1"], snapshots["Q2"])
+    q1_divergence = _divergence(snapshots["Q1"], snapshots["Q2"])
+
     return Data(
         snapshots=snapshots,
         quotas=quotas,
@@ -146,6 +152,8 @@ def load_data(
         as_of=as_of,
         region_mismatch_count=region_mismatch_count,
         region_deal_count=region_deal_count,
+        change_log=change_log,
+        divergence=q1_divergence,
     )
 
 

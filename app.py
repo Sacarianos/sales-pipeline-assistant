@@ -13,6 +13,7 @@ import anthropic
 import streamlit as st
 
 from acme import config
+from acme.catalog import build_catalog
 from acme.domain import Answered, Refused
 from acme.loading import load_data
 from acme.pipeline import ask
@@ -37,6 +38,7 @@ def get_client() -> anthropic.Anthropic | None:
 
 data = get_data()
 client = get_client()
+catalog = build_catalog(data)
 
 if "history" not in st.session_state:
     st.session_state.history = []  # list of (question, Answer)
@@ -72,7 +74,8 @@ with chat_col:
                 elif answer.narrator_blocked:
                     st.caption("Model output blocked: a figure didn't verify. Showing the computed sentence instead.")
 
-    question = st.chat_input("Ask about pipeline, e.g. \"how are we tracking this quarter\"")
+    placeholder_example = catalog.examples()[0]
+    question = st.chat_input(f'Ask about pipeline, e.g. "{placeholder_example}"')
     if question:
         answer = ask(question, data, client)
         st.session_state.history.append((question, answer))
@@ -118,9 +121,6 @@ with panel_col:
 
 with st.sidebar:
     st.markdown("### What I can answer")
-    from acme.catalog import build_catalog
-
-    catalog = build_catalog(data)
     for spec in catalog.metrics:
         st.markdown(f"**{spec.name}** — {', '.join(spec.groupings)}")
         st.caption(spec.description)

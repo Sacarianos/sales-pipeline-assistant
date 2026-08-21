@@ -133,6 +133,51 @@ def _match_period(question: str, catalog: Catalog) -> tuple[str, bool]:
     return current, True
 
 
+def _explicit_periods_in_order(question: str, catalog: Catalog) -> list[str]:
+    """Every explicitly-named quarter, in the order it appears in the text.
+
+    `_match_period` checks patterns in a fixed order and returns on the
+    first hit, which can't tell "Q2 versus Q1" from "Q1 versus Q2". A
+    comparison question needs to, since the first quarter named is the one
+    being asked about and the second is the target.
+    """
+    lowered = question.lower()
+    hits: list[tuple[int, str]] = []
+    for pattern, period in EXPLICIT_PERIOD_PATTERNS:
+        if period not in catalog.periods:
+            continue
+        for m in re.finditer(pattern, lowered):
+            hits.append((m.start(), period))
+    hits.sort(key=lambda hit: hit[0])
+
+    ordered: list[str] = []
+    for _, period in hits:
+        if period not in ordered:
+            ordered.append(period)
+    return ordered
+
+
+def _match_comparison_periods(
+    question: str, catalog: Catalog
+) -> tuple[str, str | None, bool]:
+    """(period, comparison_period, period_defaulted) for a comparison question.
+
+    Two explicitly named quarters read in order: the first is the period
+    being asked about, the second is the comparison target. One named
+    quarter reads as the target, with the primary period resolved the same
+    way a bare question would be. No named quarter leaves the target unset
+    rather than guessing one, which validation refuses.
+    """
+    ordered = _explicit_periods_in_order(question, catalog)
+    if len(ordered) >= 2:
+        return ordered[0], ordered[1], False
+
+    period, defaulted = _match_period(question, catalog)
+    if ordered and ordered[0] != period:
+        return period, ordered[0], defaulted
+    return period, None, defaulted
+
+
 def _match_value(question: str, values: tuple[str, ...]) -> str | None:
     lowered = question.lower()
     for value in values:
@@ -180,6 +225,7 @@ def restate(
     segment: str | None = None,
     rep: str | None = None,
     manager: str | None = None,
+    comparison_period: str | None = None,
 ) -> str:
     """The one sentence that renders inside the answer, templated from the intent."""
     if rep:
@@ -193,7 +239,13 @@ def restate(
     else:
         scope = f"broken out by {grouping}"
 
-    sentence = f"Reading this as {metric} {scope} for {period}"
+    if metric == "comparison" and comparison_period:
+        sentence = (
+            f"Reading this as comparison {scope} for {period} against the "
+            f"same day of quarter in {comparison_period}"
+        )
+    else:
+        sentence = f"Reading this as {metric} {scope} for {period}"
     if period_defaulted:
         sentence += (
             ", the quarter containing the as-of date, "
@@ -241,8 +293,13 @@ def _region_intent(question: str, catalog: Catalog) -> Intent:
 
 def route_offline(question: str, catalog: Catalog) -> Intent:
     """Keyword routing. Refuses rather than guesses when nothing matches."""
-    period, defaulted = _match_period(question, catalog)
     metric, why_not = _match_metric(question, catalog)
+
+    comparison_period: str | None = None
+    if metric == "comparison":
+        period, comparison_period, defaulted = _match_comparison_periods(question, catalog)
+    else:
+        period, defaulted = _match_period(question, catalog)
 
     if metric is None:
         return Intent(
@@ -265,6 +322,7 @@ def route_offline(question: str, catalog: Catalog) -> Intent:
         metric=metric,
         grouping=grouping,
         period=period,
+        comparison_period=comparison_period,
         segment=segment,
         rep=rep,
         manager=manager,
@@ -276,6 +334,7 @@ def route_offline(question: str, catalog: Catalog) -> Intent:
             segment=segment,
             rep=rep,
             manager=manager,
+            comparison_period=comparison_period,
         ),
     )
 

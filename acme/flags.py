@@ -14,7 +14,8 @@ regardless. Unknown stage — the loud half of the open-as-complement decision
 Issue 06 adds snapshot divergence and changed deals, both reading the change
 log the loader now diffs at load time. Issue 07 adds the invented-rule
 disclosure for risk, so nobody repeats the 100 percent threshold as a
-Acme standard.
+Acme standard. Issue 08 adds the backloading disclosure for comparison,
+so a mid-quarter gap is never read as a projection to quarter end.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from typing import Callable
 from .definitions import definition, title
 from .domain import Flag, Intent, Result
 from .loading import CLOSED_LOST, CLOSED_STAGES, Data
-from .periods import day_of_quarter, days_in_quarter, is_in_progress
+from .periods import date_for_day_of_quarter, day_of_quarter, days_in_quarter, is_in_progress
 
 Rule = Callable[[Intent, Result, Data], Flag | None]
 
@@ -206,6 +207,36 @@ def invented_risk_rule(intent: Intent, result: Result, data: Data) -> Flag | Non
             "rule was rejected on purpose: early in a quarter, most reps have "
             "closed nothing yet, and pace would flag nearly everyone without "
             "telling a leader anything they could act on."
+        ),
+    )
+
+
+@rule
+def backloading(intent: Intent, result: Result, data: Data) -> Flag | None:
+    """How much of the comparison period's eventual total had already landed
+    by the same-day-of-quarter cutoff, so a leader doesn't project a
+    mid-quarter gap onto quarter end. A quarter that finished strong from a
+    slow start looks identical, at day 32, to one that's genuinely behind —
+    this is what tells the two apart."""
+    if intent.metric != "comparison" or "comparison_eventual_closed_won" not in result.facts:
+        return None
+    landed = result.facts["comparison_closed_won"].value
+    eventual = result.facts["comparison_eventual_closed_won"].value
+    day = int(result.facts["day_of_quarter"].value)
+    share_pct = landed / eventual * 100 if eventual else 0.0
+    current_date = date_for_day_of_quarter(intent.period, day)
+    comparison_date = date_for_day_of_quarter(intent.comparison_period, day)
+    return Flag(
+        kind="backloading",
+        title="Backloading",
+        detail=(
+            f"Day {day} of {intent.period} is {current_date:%B} {current_date.day}; "
+            f"day {day} of {intent.comparison_period} is "
+            f"{comparison_date:%B} {comparison_date.day}. Only {landed:,.0f} of "
+            f"{intent.comparison_period}'s eventual {eventual:,.0f} total had "
+            f"landed by then ({share_pct:.1f} percent), so {intent.comparison_period} "
+            "finished strong from a slow start. A gap at this same point in "
+            "the quarter doesn't project the same way onto quarter end."
         ),
     )
 

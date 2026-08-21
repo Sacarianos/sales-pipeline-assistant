@@ -53,6 +53,14 @@ DEFINITIONS: dict[str, str] = {
         "quota this quarter if every open deal they have closes. Below 100 "
         "percent means they cannot, even in that best case."
     ),
+    "comparison": (
+        "A cross-quarter comparison matches the same day of quarter rather "
+        "than the same calendar date, so a partial current quarter is "
+        "measured against the same fraction of the earlier quarter rather "
+        "than the whole of it. Each side is computed from the snapshot that "
+        "owns it — the earlier quarter is never restated for this purpose — "
+        "and the two are never blended into one figure."
+    ),
 }
 
 

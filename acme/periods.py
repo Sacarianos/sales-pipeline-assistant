@@ -6,7 +6,7 @@ open or closed. No other date field determines period.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 QUARTERS: dict[str, tuple[date, date]] = {
     "Q1-2026": (date(2026, 1, 1), date(2026, 3, 31)),
@@ -51,6 +51,19 @@ def day_of_quarter(period: str, as_of: date) -> int:
 def is_in_progress(period: str, as_of: date) -> bool:
     start, end = bounds(period)
     return start <= as_of <= end
+
+
+def date_for_day_of_quarter(period: str, day: int) -> date:
+    """The calendar date that is day `day` of `period`, clamped to the
+    quarter's own range.
+
+    Matching by day of quarter rather than calendar date is what lets day 32
+    of Q2 (May 2) compare fairly against day 32 of Q1 (February 1) instead of
+    against the calendar date May 2 in a quarter that hasn't reached it yet.
+    """
+    start, end = bounds(period)
+    candidate = start + timedelta(days=max(day, 1) - 1)
+    return min(candidate, end)
 
 
 def year_of(period: str) -> int:

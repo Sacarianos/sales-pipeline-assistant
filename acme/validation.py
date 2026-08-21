@@ -109,6 +109,17 @@ def validate(intent: Intent, catalog: Catalog, data: Data) -> ValidationError | 
             "nothing left that could still close"
         )
 
+    if intent.metric == "comparison" and not intent.comparison_period:
+        return ValidationError(
+            "comparison needs a target period to compare against; ask, for "
+            "example, how this quarter compares to the same point in the "
+            "other one"
+        )
+    if intent.comparison_period and intent.comparison_period not in catalog.periods:
+        return ValidationError(
+            f"comparison period '{intent.comparison_period}' is not in the catalog"
+        )
+
     if intent.segment and intent.segment not in catalog.segments:
         return ValidationError(f"segment '{intent.segment}' is not in the catalog")
     if intent.manager and intent.manager not in catalog.managers:

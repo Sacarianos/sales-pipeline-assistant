@@ -593,29 +593,38 @@ being written as prose in two places.
 
 ### Planned for V2
 
-A text-to-SQL fallback lane over DuckDB for questions the registry doesn't cover,
-with `sqlglot` validating that the generated statement is a single read-only
-select against whitelisted tables. Results get a visually distinct treatment
-marking them exploratory rather than a defined metric, with the SQL shown
-expanded, and they never receive the same verified badge.
+A fallback lane for questions the registry doesn't cover, specified in
+[V2 exploratory fallback lane](v2-exploratory-fallback.md). Results get a
+visually distinct treatment marking them exploratory rather than a defined
+metric, with the generated query shown expanded, and they never receive the
+same verified badge.
 
-A promote-to-metric path so that a logged fallback query which keeps recurring
-can be turned into a registered metric.
+That lane was planned here as text-to-SQL over DuckDB with `sqlglot` validating
+a read-only single select. It generates pandas instead, validated as an AST
+against an allowlist, because the rules this system trusts (period membership,
+open as the complement of the closed stages, the joined rep attributes) live in
+the loader's frames rather than in the CSVs, and a lane that rebuilt them in
+SQL could disagree with the metric lane about what "open" means. Recorded in
+ADR-0006.
 
-Neither is built now. The V1 design should avoid choices that would make them
-expensive later, which is part of why the result shape carries its filters and
-snapshot explicitly and why the catalog is the single source of truth.
+A promote-to-metric path, so that a logged fallback query which keeps recurring
+can be turned into a registered metric, moves to V3. The query log that feeds
+it ships with V2.
+
+The V1 design avoids choices that would make these expensive later, which is
+part of why the result shape carries its filters and snapshot explicitly and
+why the catalog is the single source of truth.
 
 ### Stack
 
-`anthropic`, `pydantic`, `pandas`, and `streamlit`. `duckdb` and `sqlglot` arrive
-with V2.
+`anthropic`, `pydantic`, `pandas`, and `streamlit`. V2 adds no dependency:
+`duckdb` and `sqlglot` are not adopted, per ADR-0006.
 
 ### Decisions recorded as ADRs
 
 ADR-0001 ID reuse detection. ADR-0002 the fact value object. ADR-0003 verifier
 pattern exemptions. ADR-0004 offline router visibility. ADR-0005 default period
-resolution.
+resolution. ADR-0006 the fallback lane generates pandas rather than SQL.
 
 The vocabulary used throughout this spec is defined in `CONTEXT.md` at the repo
 root.

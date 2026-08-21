@@ -213,6 +213,33 @@ def invented_risk_rule(intent: Intent, result: Result, data: Data) -> Flag | Non
 
 
 @rule
+def product_line_attribution(intent: Intent, result: Result, data: Data) -> Flag | None:
+    """Discloses the one real assumption behind a product-mix answer: every
+    deal in this data carries exactly one product-line tag, which is a
+    verified fact, not a guess. Whether that tag reflects a strict
+    one-product-per-deal rule or a convention for recording a bundled deal
+    is not something the file confirms either way. If a bundle exists
+    anywhere in this data, this total assigns its whole value to the one
+    tag recorded, overstating that product line and understating the
+    others. The number is computed and shown regardless, since the
+    assumption travels with the figure rather than blocking it."""
+    if intent.metric != "product_mix":
+        return None
+    return Flag(
+        kind="product_line_attribution",
+        title="One tag per deal",
+        lede=(
+            "Every deal in this data carries exactly one product-line tag, "
+            "with no split. If a deal is actually a bundle across product "
+            "lines, its whole value counts toward the single tag recorded, "
+            "which would overstate that product line and understate the "
+            "others. This dataset does not confirm whether the one-tag rule "
+            "reflects how Acme actually books bundled deals"
+        ),
+    )
+
+
+@rule
 def backloading(intent: Intent, result: Result, data: Data) -> Flag | None:
     """How much of the comparison period's eventual total had already landed
     by the same-day-of-quarter cutoff, so a leader doesn't project a

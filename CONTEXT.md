@@ -41,6 +41,19 @@ written by hand. Region questions refuse for this reason rather than picking
 one definition silently; segment carries no equivalent ambiguity.
 _Avoid_: territory, area
 
+**Product line**:
+One of three values recorded on every deal. Unlike region, this is not two
+definitions disagreeing: the column is clean, no nulls, an identical value
+set across both snapshots. The `product_mix` metric reports closed-won and
+open pipeline split by product line, with no quota comparison, since quotas
+in this data are recorded per rep with no product breakdown to divide by.
+The one real assumption is that each deal carries exactly one product-line
+tag, so a bundled deal, if one exists, would have its whole value counted
+toward a single product line. Nothing in this data confirms whether that
+happens; the `product_line_attribution` flag says so on every answer rather
+than the number being withheld over it.
+_Avoid_: product, SKU
+
 **Best case**:
 Closed-won revenue plus open pipeline for a period, both sides filtered to
 the same period by period membership. The ceiling that scope could still

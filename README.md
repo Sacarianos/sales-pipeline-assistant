@@ -107,6 +107,7 @@ narrator to work out by subtracting two others.
 | attainment | yes | yes | yes | yes |
 | risk | yes | no | yes | no |
 | comparison | yes | yes | no | no |
+| product_mix | yes | no | no | no |
 
 Attainment is closed-won revenue against quota for a period. Risk is
 best-case coverage (closed-won plus open pipeline) per rep, flagging anyone
@@ -114,15 +115,25 @@ who can't clear quota even if every open deal closes; the 100 percent
 threshold is this system's own invention, and every risk answer says so.
 Comparison matches a current period against an earlier one at the same day
 of quarter rather than the same calendar date, drawing each side from the
-snapshot that owns it and never blending the two.
+snapshot that owns it and never blending the two. Product mix is closed-won
+and open pipeline split by product line, with no quota comparison, since
+quotas here are recorded per rep with no product breakdown to divide by;
+every deal carries exactly one product-line tag, and the one real
+assumption, that a bundled deal would have its whole value counted toward a
+single tag, is disclosed on every answer rather than used as a reason to
+withhold the number.
 
-Two questions refuse on purpose. Region refuses because the deal's own
+One question refuses on purpose. Region refuses because the deal's own
 region and its owning rep's home region disagree on 17 of 92 deals in this
 data, a count the refusal computes at load time rather than quoting from a
-written string. Anything outside the catalog entirely (Slack sentiment,
-forecasts, account-level questions) refuses with the coverage list read off
-the same catalog the router prompt uses, so the refusal reads as a boundary
-the system knows about, not a gap it's hiding.
+written string. Product line was refused alongside region early on for the
+same reason, and that reasoning didn't hold up: unlike region, product line
+has no second, disagreeing source to refuse over, just a single clean tag
+per deal and an assumption worth disclosing rather than a reason to
+withhold. Anything outside the catalog entirely (Slack sentiment, forecasts,
+account-level questions) refuses with the coverage list read off the same
+catalog the router prompt uses, so the refusal reads as a boundary the
+system knows about, not a gap it's hiding.
 
 ## Setup
 

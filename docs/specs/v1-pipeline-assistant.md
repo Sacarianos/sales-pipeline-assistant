@@ -427,14 +427,31 @@ or an empty screen.
 
 ### Interface
 
-Two columns. Chat on the left. The right panel has four stacked sections, all
-visible without clicking: the computed figures, the flags, the source rows with
-the filter and row count, and a trace showing the intent and the answering
-snapshot.
+Two columns of equal width. Chat on the left, inside a fixed-height transcript
+so it reads as a chat window rather than a page that grows without end. The
+right panel has four stacked sections, all visible without clicking: the
+computed figures, the flags, the source rows with the filter and row count, and
+a trace showing the intent and the answering snapshot.
 
 The restatement renders inside the answer itself and not in the trace panel. It
 is the only backstop against a silent misroute, so a human has to see it without
 opening anything.
+
+The figures section leads with a chart, and the flags section renders the
+caveats specific to an answer ahead of the static definitions it rests on.
+Everything stays on screen either way. Density is a typography problem here,
+never a visibility one, because an assumption behind a click is the exact
+surprise the panel exists to prevent, and a wall of undifferentiated text
+defeats that goal as thoroughly as hiding would.
+
+Sidebar example questions are buttons that ask the question rather than quoted
+text the reader has to retype, and like the refusal message they are read from
+the catalog.
+
+Prose renders word by word as it publishes. Nothing streams from a model call:
+the narrator's paragraph is complete and verified before the first word appears,
+so the effect replays text already final and cannot show a figure ahead of the
+verifier.
 
 ### Models
 
@@ -556,7 +573,15 @@ values for the acceptance cases.
 
 Region questions, product line, and account-level questions. Forecasts and
 anything forward-looking. Any period outside Q1-2026 and Q2-2026. Multi-turn
-follow-ups. Charts. Authentication. Write-back to any source system.
+follow-ups. Authentication. Write-back to any source system.
+
+Charts were excluded from the original V1 cut and are now in, one per metric,
+under a rule that keeps the exclusion's intent: the view layer computes
+nothing. A chart may only plot a value that is already a Fact or a column of
+the aggregate table the metric returned, so it is a second rendering of an
+answer and never a second source for one. A metric with no chart registered
+renders without one, which is what keeps the one-file rule above intact.
+`tests/test_charts.py` enforces this against the data bound to every chart.
 
 Rep-level comparison and segment-level or manager-level risk are out of scope for
 V1 per the grouping matrix.

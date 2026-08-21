@@ -84,11 +84,25 @@ class Result:
 
 @dataclass(frozen=True)
 class Flag:
-    """One assumption, caveat, or definition the answer rests on."""
+    """One assumption, caveat, or definition the answer rests on.
+
+    `lede` is the sentence. `items` is the list that sentence introduces,
+    where it introduces one, held as data rather than folded into the prose
+    so the interface can lay a long list out as something readable instead of
+    a paragraph of comma-separated IDs. `detail` puts the two back together
+    and is what anything wanting the whole caveat as one string should read.
+    """
 
     kind: str
     title: str
-    detail: str
+    lede: str
+    items: tuple[str, ...] = ()
+
+    @property
+    def detail(self) -> str:
+        if not self.items:
+            return self.lede
+        return f"{self.lede}: {', '.join(self.items)}."
 
 
 @dataclass(frozen=True)

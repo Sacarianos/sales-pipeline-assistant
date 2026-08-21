@@ -50,7 +50,7 @@ def partial_period(intent: Intent, result: Result, data: Data) -> Flag | None:
     return Flag(
         kind="partial_period",
         title="Partial period",
-        detail=(
+        lede=(
             f"{period} is in progress: day {day} of {total} as of {data.as_of}. "
             "A quarter that is a third done reads low against a full quota by "
             "design, not because pace has failed."
@@ -75,7 +75,7 @@ def small_sample(intent: Intent, result: Result, data: Data) -> Flag | None:
     return Flag(
         kind="small_sample",
         title="Small sample",
-        detail=(
+        lede=(
             f"This answer rests on {count} deal{'s' if count != 1 else ''}, fewer "
             f"than the {SMALL_SAMPLE_THRESHOLD} the system treats as enough to "
             "read as more than one data point."
@@ -97,15 +97,15 @@ def stale_close_date(intent: Intent, result: Result, data: Data) -> Flag | None:
     stale = deals[~deals["stage"].isin(CLOSED_STAGES) & (deals["close_date"] <= data.as_of)]
     if stale.empty:
         return None
-    names = ", ".join(f"{row.deal_id} ({row.account_name})" for row in stale.itertuples())
     return Flag(
         kind="stale_close_date",
         title="Stale close date",
-        detail=(
+        lede=(
             f"{len(stale)} open deal{'s' if len(stale) != 1 else ''} in the "
             f"{result.snapshot} snapshot carry a forecast close date at or "
-            f"before {data.as_of} and have not closed: {names}."
+            f"before {data.as_of} and have not closed"
         ),
+        items=tuple(f"{row.deal_id} ({row.account_name})" for row in stale.itertuples()),
     )
 
 
@@ -121,16 +121,16 @@ def missing_field(intent: Intent, result: Result, data: Data) -> Flag | None:
     missing = lost[lost["loss_reason"].isna()]
     if missing.empty:
         return None
-    names = ", ".join(f"{row.deal_id} ({row.account_name})" for row in missing.itertuples())
     verb = "has" if len(missing) == 1 else "have"
     return Flag(
         kind="missing_field",
         title="Missing loss reason",
-        detail=(
+        lede=(
             f"{len(missing)} closed-lost deal{'s' if len(missing) != 1 else ''} "
             f"in the {result.snapshot} snapshot {verb} no loss reason "
-            f"recorded: {names}."
+            f"recorded"
         ),
+        items=tuple(f"{row.deal_id} ({row.account_name})" for row in missing.itertuples()),
     )
 
 
@@ -153,7 +153,7 @@ def snapshot_divergence(intent: Intent, result: Result, data: Data) -> Flag | No
     return Flag(
         kind="snapshot_divergence",
         title="Q1 as-reported versus restated",
-        detail=(
+        lede=(
             f"As-reported Q1 closed-won is {as_reported:,.0f}; restated from the "
             f"Q2 snapshot it is {restated:,.0f}, a gap of {gap:,.0f}. Of that gap, "
             f"{div.unwon_count} deal{'s' if div.unwon_count != 1 else ''} worth "
@@ -177,15 +177,16 @@ def changed_deals(intent: Intent, result: Result, data: Data) -> Flag | None:
     if not present:
         return None
     by_deal = data.change_log[data.change_log["deal_id"].isin(present)].drop_duplicates("deal_id")
-    names = ", ".join(
-        f"{row.deal_id} ({row.change_type})" for row in by_deal.sort_values("deal_id").itertuples()
-    )
     return Flag(
         kind="changed_deals",
         title="Deals changed between snapshots",
-        detail=(
+        lede=(
             f"{len(present)} deal{'s' if len(present) != 1 else ''} in this answer's "
-            f"source rows changed between the Q1 and Q2 snapshots: {names}."
+            f"source rows changed between the Q1 and Q2 snapshots"
+        ),
+        items=tuple(
+            f"{row.deal_id} ({row.change_type})"
+            for row in by_deal.sort_values("deal_id").itertuples()
         ),
     )
 
@@ -201,7 +202,7 @@ def invented_risk_rule(intent: Intent, result: Result, data: Data) -> Flag | Non
     return Flag(
         kind="invented_rule",
         title="Invented threshold",
-        detail=(
+        lede=(
             "Below 100 percent best-case coverage is a threshold this system "
             "invented for this analysis, not a Acme standard. A pace-based "
             "rule was rejected on purpose: early in a quarter, most reps have "
@@ -229,7 +230,7 @@ def backloading(intent: Intent, result: Result, data: Data) -> Flag | None:
     return Flag(
         kind="backloading",
         title="Backloading",
-        detail=(
+        lede=(
             f"Day {day} of {intent.period} is {current_date:%B} {current_date.day}; "
             f"day {day} of {intent.comparison_period} is "
             f"{comparison_date:%B} {comparison_date.day}. Only {landed:,.0f} of "
@@ -249,7 +250,7 @@ def unknown_stage(intent: Intent, result: Result, data: Data) -> Flag | None:
     return Flag(
         kind="unknown_stage",
         title="Unrecognized deal stage",
-        detail=(
+        lede=(
             f"The snapshot contains a stage the loader has not been told about: "
             f"{stages}. It is counted as open by exclusion rather than dropped."
         ),
@@ -258,7 +259,7 @@ def unknown_stage(intent: Intent, result: Result, data: Data) -> Flag | None:
 
 def _definition_flags(result: Result) -> list[Flag]:
     return [
-        Flag(kind=f"definition:{key}", title=title(key), detail=definition(key))
+        Flag(kind=f"definition:{key}", title=title(key), lede=definition(key))
         for key in result.definition_keys
     ]
 

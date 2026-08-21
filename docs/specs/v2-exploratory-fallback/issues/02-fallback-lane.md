@@ -44,21 +44,64 @@ type.
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
-- [ ] A loss-reason question answers in the fallback lane with a table
-- [ ] An account-level question answers in the fallback lane
-- [ ] A question a registered metric covers is answered by the metric lane,
+- [x] A loss-reason question answers in the fallback lane with a table
+- [x] An account-level question answers in the fallback lane
+- [x] A question a registered metric covers is answered by the metric lane,
       asserted by the lane marker
-- [ ] Region refuses and no generation is attempted
-- [ ] Product line refuses and no generation is attempted
-- [ ] The product-line refusal names attribution, not data quality, and quotes
+- [x] Region refuses and no generation is attempted
+- [x] Product line refuses and no generation is attempted
+- [x] The product-line refusal names attribution, not data quality, and quotes
       a count computed at load time
-- [ ] A question needing a column nobody has refuses rather than answering
-- [ ] The generator prompt contains no data row
-- [ ] The lane exposes per-snapshot frames and no combined frame
-- [ ] A generated expression failing validation returns a refusal with the
+- [x] A question needing a column nobody has refuses rather than answering
+- [x] The generator prompt contains no data row
+- [x] The lane exposes per-snapshot frames and no combined frame
+- [x] A generated expression failing validation returns a refusal with the
       catalog coverage hint
-- [ ] Prose in the fallback lane is still verified against facts
-- [ ] The generator uses `claude-sonnet-5` from the configuration constant
-- [ ] The fallback degrades to a refusal when the model API is unreachable
+- [x] Prose in the fallback lane is still verified against facts
+- [x] The generator uses `claude-sonnet-5` from the configuration constant
+- [x] The fallback degrades to a refusal when the model API is unreachable
+
+**Implementation notes:** `acme/fallback.py`'s `attempt()` returns `None`
+for every reason the lane can't answer (no client, unreachable API, a
+decline, a rejected expression), which is the one thing `pipeline.py` checks
+before falling through to the ordinary catalog refusal — the lane never
+refuses on its own, it only answers or steps aside. Region and product line
+were generalized in `router.py` into one `RefusedTopic` shape (label, word
+pattern, catalog values, a reason method) walked as a small registry in
+`route()`, replacing what would otherwise have been two structurally
+identical `_mentions_*`/`*_intent` pairs — caught in code review as real
+duplication, not a style nit, since `_match_value` already generalizes this
+exact shape elsewhere in the same file. Facts are derived generically from
+whatever shape the sandboxed result takes: a row-count Fact always exists
+for a tabular result regardless of size, and per-row Facts join it only up
+to `FACT_ROW_CAP` (8) rows, so a large result can still be narrated by its
+count without ever letting the narrator cite a row nobody vetted — verified
+live against the real API, where a 46-row result initially produced an
+empty facts dict and the narrator wrote an apologetic non-answer that
+trivially passed verification (zero numeric tokens); the row-count fact
+fixes that. `Answered` gained `lane`, `expression`, and a `restated` field
+promoted from a property that only ever read `intent.restated` — the
+fallback lane has no `Intent`, so that property silently returned `""` for
+every exploratory answer until code review caught it; both lanes now set
+`restated` directly.
+
+Two live-API findings worth carrying forward rather than re-discovering:
+first, the generator's initial system prompt let the model reach for
+`pd.concat`/`.add(fill_value=...)` to answer "why are we losing deals" and
+"which accounts have the most pipeline" across both quarters, which the
+sandbox correctly rejected (see issue 01's notes on `mutually_exclusive`)
+but cost real answers until the prompt was strengthened to say so
+explicitly and to default to `deals_q2` alone when no quarter is named.
+Second, narration of a fallback answer is non-deterministic the same way a
+metric answer's is — one run of "why are we losing deals" had the narrator
+correctly cite six individual counts and verify; another run summed two of
+them into "4 of 8" and got correctly blocked to the template. Neither is a
+defect; both are the verifier working exactly as designed on a lane where
+the interpretation, not just the arithmetic, is model-generated.
+
+16 tests in `tests/test_fallback_lane.py`, 158 passing overall. Reviewed via
+`/code-review` on both axes; the sandbox mutual-exclusion gap (shared with
+issue 01), the discarded `restated`, and the router duplication were all
+fixed in response.

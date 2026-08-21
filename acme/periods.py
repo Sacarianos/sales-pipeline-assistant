@@ -76,3 +76,14 @@ def snapshot_for(period: str) -> str:
     Q1 questions read the Q1 snapshot as reported. Q2 questions read Q2.
     """
     return "Q1" if period == "Q1-2026" else "Q2"
+
+
+def period_for_snapshot(snapshot: str) -> str:
+    """The inverse of `snapshot_for`: the period a snapshot name stands for.
+
+    Needed by callers that land on a snapshot first - the fallback lane
+    knows which deals frame a generated expression named before it knows
+    anything about a period - and then need the period key flag rules like
+    `partial_period` are written against.
+    """
+    return "Q1-2026" if snapshot == "Q1" else "Q2-2026"

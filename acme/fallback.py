@@ -32,8 +32,10 @@ from pydantic import BaseModel, Field
 
 from .config import ROUTER_MODEL
 from .domain import Answered, Fact, Unit
+from .flags import evaluate_for_snapshot
 from .loading import Data
 from .narrator import narrate
+from .periods import period_for_snapshot
 from .sandbox import ROW_CAP, SandboxRejection, SandboxResult, run as sandbox_run
 
 FRAME_NAMES = ("deals_q1", "deals_q2", "quotas", "reps")
@@ -282,6 +284,17 @@ def attempt(
         "row cap": f"first {ROW_CAP} of {outcome.row_count}" if outcome.truncated else "no truncation",
     }
 
+    # A stale close date and a partial period are properties of the snapshot
+    # an exploratory query read, not of the lane that read it, so those
+    # caveats still run here - see `flags.evaluate_for_snapshot` for why only
+    # the snapshot-level rules apply and not the ones keyed to a specific
+    # metric's rows or facts. The snapshot is whichever deals frame the
+    # expression named - the sandbox enforces Q1 XOR Q2 - defaulting to the
+    # current quarter when the expression touched no deals frame at all, the
+    # same default the generator itself is told to use.
+    flag_snapshot = "Q1" if "deals_q1" in frames_read else "Q2"
+    flags = evaluate_for_snapshot(period_for_snapshot(flag_snapshot), flag_snapshot, data)
+
     # Same contract as a metric's answer: the narrator sees only the
     # question, a restatement, and the facts just derived, and its prose is
     # verified against those facts before publishing.
@@ -297,10 +310,11 @@ def attempt(
         verified_figures=narration.verified_figures,
         narrator_blocked=narration.blocked,
         facts=facts,
+        flags=flags,
         table=display,
         source_rows=display,
         filters=filters,
-        snapshot="",
+        snapshot=flag_snapshot,
         intent=None,
         router_mode="online",
     )

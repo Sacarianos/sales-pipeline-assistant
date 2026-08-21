@@ -37,6 +37,31 @@ st.set_page_config(page_title="Acme pipeline assistant", layout="wide")
 WORD_DELAY_SECONDS = 0.02
 TRANSCRIPT_HEIGHT = 520
 
+# The one place in this app where alarm is the correct register. Everywhere
+# else the interface keeps caveats legible without making them frightening,
+# because a leader alarmed by a partial-period notice stops reading notices
+# altogether - but the risk here is specific and real (a model wrote the
+# query, not a person), so the treatment matches it. What's unverified is
+# the interpretation, not the arithmetic: the numbers are computed and
+# checked exactly as a metric's are, so the warning says that rather than
+# implying the arithmetic itself is suspect.
+EXPLORATORY_WARNING = (
+    "This answer did not come from a defined metric in the catalog. A model "
+    "wrote the query below to answer your question, and that query has not "
+    "been checked. The figures it produced were computed by pandas and the "
+    "prose above was checked against them, the same way a metric's is - "
+    "what's unverified is whether the query answered the question you "
+    "asked. Check it before you repeat this figure to anyone."
+)
+EXPLORATORY_BADGE = (
+    "Figures computed and checked against the query above. The query itself "
+    "was written by a model."
+)
+NARRATION_BLOCKED_CAPTION = (
+    "⚠ Model output blocked: a figure didn't verify. "
+    "Showing the computed sentence instead."
+)
+
 # Nothing here sets a background or a text colour of its own. The app runs in
 # whichever theme the reader has chosen, and painting a light panel into a
 # dark theme is how a white sidebar ended up holding white text and a white
@@ -57,6 +82,16 @@ STYLE = """
     border-radius: 999px; padding: .1rem .45rem; margin: 0 .25rem .3rem 0;
   }
   .metric-desc { font-size: .74rem; opacity: .7; line-height: 1.4; margin: 0 0 .45rem 0; }
+
+  /* The one badge in the app that has to read as a warning rather than as
+     a neutral label, so it borrows red rather than the grey every other
+     pill uses - the same distinction the red banner above it draws. */
+  .exploratory-pill {
+    display: inline-block; font-size: .66rem; font-weight: 650; letter-spacing: .03em;
+    text-transform: uppercase; color: #c0392b;
+    background: rgba(192,57,43,.12); border: 1px solid rgba(192,57,43,.4);
+    border-radius: 999px; padding: .12rem .5rem; margin: 0 0 .5rem 0;
+  }
 
   .panel-heading {
     display: flex; align-items: center; gap: .35rem;
@@ -207,17 +242,29 @@ def _render_answer(answer: Answer, *, stream: bool) -> None:
             st.caption(answer.intent.restated)
         return
 
+    if answer.lane == "exploratory":
+        # The warning comes first, above the answer rather than below it,
+        # in the strongest treatment the interface has - this is the one
+        # place alarm is the right register. The expression follows it
+        # immediately, expanded and never behind a click: it's the one
+        # thing about this answer a reader can't otherwise check, so it
+        # belongs in front of them rather than in the side panel.
+        st.markdown("<span class='exploratory-pill'>Exploratory</span>", unsafe_allow_html=True)
+        st.error(EXPLORATORY_WARNING)
+        st.code(answer.expression, language="python")
+
     if stream:
         st.write_stream(_typewriter(answer.prose))
     else:
         st.write(answer.prose)
-    if answer.prose_source == "narrator":
+    if answer.lane == "exploratory":
+        st.caption(EXPLORATORY_BADGE)
+        if answer.narrator_blocked:
+            st.caption(NARRATION_BLOCKED_CAPTION)
+    elif answer.prose_source == "narrator":
         st.caption(f"✓ {answer.verified_figures} figures verified against computed values")
     elif answer.narrator_blocked:
-        st.caption(
-            "⚠ Model output blocked: a figure didn't verify. "
-            "Showing the computed sentence instead."
-        )
+        st.caption(NARRATION_BLOCKED_CAPTION)
 
 
 def _info(key: str) -> str:
@@ -418,3 +465,8 @@ with panel_col:
         st.caption(f"Snapshot answering: {answer.snapshot}")
         if answer.intent is not None:
             st.json(answer.intent.model_dump())
+        elif answer.lane == "exploratory":
+            # No structured Intent exists for this lane - it never went
+            # through the router's reading - so the restatement is what
+            # stands in for the trace an intent would otherwise give.
+            st.caption(answer.restated)

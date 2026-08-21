@@ -27,10 +27,12 @@ class Catalog:
     reps: tuple[str, ...]
     managers: tuple[str, ...]
     regions: tuple[str, ...]
+    product_lines: tuple[str, ...]
     periods: tuple[str, ...]
     as_of: date
     region_mismatch_count: int
     region_deal_count: int
+    product_line_deal_count: int
 
     def metric_names(self) -> tuple[str, ...]:
         return tuple(spec.name for spec in self.metrics)
@@ -69,6 +71,23 @@ class Catalog:
             "the current snapshot. Ask about segment, rep, or manager instead."
         )
 
+    def product_line_refusal_reason(self) -> str:
+        """Why product line questions refuse, and it is not a data-quality
+        reason: the column is clean. What is unresolved is attribution, and
+        that distinction has to be in the wording, not just in a comment,
+        since a refusal implying bad data where the data is fine would be
+        caught by the first analyst who checked and would cost more trust
+        than the number was worth."""
+        return (
+            "Product line is out of scope: attribution hasn't been agreed, not "
+            "a data problem. All "
+            f"{self.product_line_deal_count} deals in the current snapshot "
+            "carry exactly one product line, so a product-line total assigns "
+            "each deal's whole value to a single product. Until that "
+            "attribution is agreed, the number is withheld rather than shown. "
+            "Ask about segment, rep, or manager instead."
+        )
+
 
 def _ordered(values) -> tuple[str, ...]:
     return tuple(sorted({str(v) for v in values if str(v) != "nan"}))
@@ -89,8 +108,10 @@ def build_catalog(data: Data) -> Catalog:
         reps=_ordered(data.reps["rep_name"]),
         managers=_ordered(data.reps["manager"]),
         regions=_ordered(data.reps["region"]),
+        product_lines=_ordered(data.deals("Q2")["product_line"]),
         periods=PERIODS,
         as_of=data.as_of,
         region_mismatch_count=data.region_mismatch_count,
         region_deal_count=data.region_deal_count,
+        product_line_deal_count=data.product_line_deal_count,
     )

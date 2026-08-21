@@ -1,4 +1,5 @@
-"""Query time: route, validate, compute, flag, render. One early exit.
+"""Query time: route, validate, compute, flag, render. One early exit, plus
+V2's second lane for whatever the registry doesn't cover.
 
 This is the primary seam. It takes a question string, the loaded data, and an
 injected model client, and returns an `Answer` — `Answered` or `Refused`. No
@@ -8,6 +9,7 @@ early exit for a refusal.
 
 from __future__ import annotations
 
+from . import fallback
 from .catalog import Catalog, build_catalog
 from .domain import Answer, Answered, Refused
 from .flags import evaluate as evaluate_flags
@@ -22,6 +24,17 @@ def ask(question: str, data: Data, client: object | None = None) -> Answer:
     catalog = build_catalog(data)
     routing = route(question, catalog, client)
     intent = routing.intent
+
+    # The registry is consulted first and always wins: a question a metric
+    # covers must never fall through to generated code, since the metric
+    # encodes a definition a human agreed to and a generated expression does
+    # not. Only an intent the router itself couldn't match, and that isn't
+    # one of the topics refused ahead of routing (region, product line),
+    # reaches the fallback lane at all.
+    if intent.is_unsupported() and not routing.refused_topic:
+        exploratory = fallback.attempt(question, data, client)
+        if exploratory is not None:
+            return exploratory
 
     error = validate(intent, catalog, data)
     if error is not None:
@@ -46,6 +59,8 @@ def ask(question: str, data: Data, client: object | None = None) -> Answer:
     narration = narrate(question, intent.restated, result.facts, result.template, client)
 
     return Answered(
+        lane="metric",
+        restated=intent.restated,
         prose=narration.prose,
         prose_source=narration.source,
         verified_figures=narration.verified_figures,

@@ -23,6 +23,10 @@ class Unit(str, Enum):
     PERCENT = "percent"
     COUNT = "count"
     DATE = "date"
+    # A computed number with no pinned business meaning — the fallback lane's
+    # unit, since a generated expression's result isn't known ahead of time to
+    # be a dollar figure, a percentage, or a count the way a metric's is.
+    NUMBER = "number"
 
 
 @dataclass(frozen=True)
@@ -45,6 +49,10 @@ class Fact:
             return f"{self.value:.1f}%"
         if self.unit is Unit.COUNT:
             return f"{self.value:,.0f}"
+        if self.unit is Unit.NUMBER:
+            if float(self.value).is_integer():
+                return f"{self.value:,.0f}"
+            return f"{self.value:,.2f}"
         return f"{self.value:.0f}"
 
 
@@ -110,6 +118,22 @@ class Answered:
     """A question that was routed, validated, computed, flagged, and rendered."""
 
     kind: Literal["answered"] = field(default="answered", init=False)
+    # "metric" for a registered metric's answer, "exploratory" for the
+    # fallback lane's. One field on one variant rather than a parallel
+    # Answered type, so every consumer that already handles an answer keeps
+    # working and the interface decides what to draw from this alone.
+    lane: Literal["metric", "exploratory"] = "metric"
+    # The generated pandas expression, set only when `lane` is "exploratory".
+    # It's the one thing a reader can't otherwise check about this answer, so
+    # it travels with the answer itself rather than living only in the log.
+    expression: str = ""
+    # The one sentence restating how the question was read, rendered inside
+    # the answer itself. For the metric lane this is `intent.restated`; the
+    # fallback lane has no `Intent` (it never went through the router's
+    # structured reading) but still owes the reader the same backstop
+    # against a silent misroute, so it's a field every lane sets directly
+    # rather than something derived only from `intent`.
+    restated: str = ""
     prose: str = ""
     prose_source: Literal["narrator", "template"] = "template"
     verified_figures: int | None = None
@@ -126,10 +150,6 @@ class Answered:
     snapshot: str = ""
     intent: Intent | None = None
     router_mode: Literal["online", "offline"] = "offline"
-
-    @property
-    def restated(self) -> str:
-        return self.intent.restated if self.intent else ""
 
     @property
     def row_count(self) -> int:

@@ -9,19 +9,30 @@ category: enhancement
 ## Problem Statement
 
 V1 answers three metrics and refuses everything else. The refusing is
-deliberate and it is most of why the tool is trustworthy, but it flattens two
-very different situations into the same response.
+deliberate and it is most of why the tool is trustworthy, but one response
+currently covers three situations that deserve different answers.
 
-Region refuses because the data disagrees with itself: the region on the deal
-and the region on the rep who owns it differ on 17 of 92 deals, so any single
-number would be picking a side silently. That refusal is the product working.
+Some questions are refused because the data cannot answer them honestly.
+Region is the case: the region on the deal and the region on the rep who owns
+it differ on 17 of 92 deals, so any single number picks a side silently. That
+refusal is the product working and it stays exactly as it is.
 
-Product line refuses because nobody wrote a metric for it. The data is clean,
-`product_line` has three unambiguous values, and every deal carries one. A
-sales leader asking "what's our pipeline by product line?" gets told the
-system doesn't cover that, which is true and useless. The same holds for
-account-level questions, for stage breakdowns, and for the long tail of
-one-off questions nobody will ever register a metric for.
+Some are refused because the number is computable but the method behind it has
+never been agreed. Product line is the case, and it is worth being precise
+about why, because the data itself is clean. There are no nulls in either
+snapshot, the value set is identical across both, and every cross-snapshot
+change is explained by ID reuse the reconciler already detects. What is not
+settled is attribution: every deal carries exactly one product line, so a
+product-line total assigns that deal's entire value to a single product. If
+deals span products, that overstates one and understates the others. Until
+somebody decides whether that attribution is right, the honest output is a
+refusal that says so.
+
+The rest are refused only because nobody wrote a metric. Stage breakdowns,
+loss reasons, deal size distributions, account-level questions, rep tenure,
+and the long tail of one-off analysis are all unambiguous in this data. A
+sales leader asking "why are we losing deals?" gets told the system doesn't
+cover that, which is true and useless.
 
 A registry cannot grow fast enough to cover ad-hoc analysis, and a leader who
 hits three refusals in a row stops asking, which is the same outcome the old
@@ -42,20 +53,22 @@ What changes is what is being trusted. In the metric lane, both the
 computation and the interpretation are pinned: a registered metric decides
 what "attainment" counts, and a human wrote that down. In the fallback lane
 the computation is still deterministic, but the interpretation is
-model-generated, so the answer carries a different treatment on screen, a
-different badge, and the expression itself shown in full. A reader should
-never have to guess which lane answered them.
+model-generated, so the answer carries the expression in full and a warning
+stated in the strongest terms the interface has. A reader should never have to
+guess which lane answered them, and the one that carries more risk is the one
+that says so loudest.
 
-Region stays refused ahead of both lanes.
+Region and product line both stay refused ahead of both lanes, each with its
+own reason computed from the data rather than quoted from a written string.
 
 ## User Stories
 
 1. As a sales leader, I want a question the registry doesn't cover to be
    answered from the data anyway, so that an unregistered question isn't a
    dead end.
-2. As a sales leader, I want an exploratory answer to look visibly different
-   from a defined metric, so that I know which of the two I'm about to repeat
-   in a meeting.
+2. As a sales leader, I want an unmissable warning when an answer came from a
+   generated query rather than a defined metric, so that I know to check it
+   before I repeat it to anyone.
 3. As a sales leader, I want the expression behind an exploratory answer shown
    without opening anything, so that the thing I can't otherwise check is the
    thing most in front of me.
@@ -64,22 +77,25 @@ Region stays refused ahead of both lanes.
 5. As a sales leader, I want region to keep refusing even though the fallback
    could compute it, so that a deliberate decision isn't quietly reversed by a
    new feature.
-6. As a sales leader, I want to be told when a question can't be answered from
+6. As a sales leader, I want product line to refuse with the attribution
+   problem named, so that I understand a number was withheld on purpose rather
+   than missing by accident.
+7. As a sales leader, I want to be told when a question can't be answered from
    the columns that exist, so that I learn the boundary rather than receive a
    confident answer about data nobody has.
-7. As a sales leader, I want the row count and the frame an exploratory answer
+8. As a sales leader, I want the row count and the frame an exploratory answer
    read from, so that I can tell a Q1 answer from a Q2 one.
-8. As an analyst, I want the generated expression to be reproducible by hand,
+9. As an analyst, I want the generated expression to be reproducible by hand,
    so that I can paste it into a notebook and get the same number.
-9. As an engineer, I want a generated expression validated before it runs, so
-   that the safety of the lane doesn't depend on the model behaving.
-10. As an engineer, I want a rejected expression to refuse rather than be
+10. As an engineer, I want a generated expression validated before it runs, so
+    that the safety of the lane doesn't depend on the model behaving.
+11. As an engineer, I want a rejected expression to refuse rather than be
     repaired, so that the failure mode stays a visible no.
-11. As an engineer, I want the fallback to read the same frames the metrics
+12. As an engineer, I want the fallback to read the same frames the metrics
     read, so that the two lanes can never disagree about what "open" means.
-12. As an engineer, I want every fallback attempt logged with its question,
+13. As an engineer, I want every fallback attempt logged with its question,
     expression, and outcome, so that V3 has something to promote from.
-13. As an engineer, I want the registry consulted first, so that a question a
+14. As an engineer, I want the registry consulted first, so that a question a
     metric covers is never answered by generated code.
 
 ## Implementation Decisions
@@ -88,7 +104,8 @@ Region stays refused ahead of both lanes.
 
 Four steps, in order, and the first that applies wins:
 
-1. Region short-circuits, exactly as it does today, before any model call.
+1. Refused topics short-circuit, before any model call. Region does this
+   today; product line joins it.
 2. The router runs against the catalog. A registered metric that validates
    answers in the metric lane, unchanged from V1.
 3. Otherwise the fallback lane attempts the question.
@@ -99,9 +116,37 @@ The registry is consulted first and always wins. A question a metric covers
 must never be answered by generated code, because the metric encodes a
 business definition a human agreed to and the generated expression does not.
 
-Region is checked ahead of everything for the same reason it is today: the
-one wrong move available to a model asked about region is silently picking one
-of the two definitions, and that substitution is invisible downstream.
+Refused topics are checked ahead of everything for the reason region is today:
+the one wrong move available to a model asked about a refused topic is
+silently substituting a nearby column, and that substitution is invisible
+downstream because the substituted value is a real one.
+
+### Refused topics
+
+Two topics refuse permanently, and they refuse for different reasons. Both
+reasons are computed at load time rather than typed into a string, so neither
+can go stale against the data.
+
+**Region** refuses because two definitions of it disagree. The deal carries
+one, the rep who owns the deal carries another, and they differ on 17 of 92
+deals in the current snapshot. Unchanged from V1.
+
+**Product line** refuses because attribution has never been agreed. The data
+is clean, which is exactly why the refusal has to say something truthful
+rather than imply a defect: there are no nulls in either snapshot, the value
+set is identical across both, and all seven cross-snapshot changes belong to
+IDs the reconciler already classifies as reused. The problem is that every
+deal records exactly one product line, so any product-line total assigns that
+deal's whole value to a single product. The refusal reports how many deals
+carry exactly one product line, names the attribution question, and says the
+number is withheld pending a decision rather than missing.
+
+This distinction matters more than it looks. A refusal that implies bad data
+where the data is fine is its own kind of dishonesty, and it would be caught
+by the first analyst who checked.
+
+Account-level questions were listed out of scope in V1 and are now answerable
+through the fallback lane, since accounts carry no equivalent ambiguity.
 
 ### What the generator sees
 
@@ -173,9 +218,20 @@ decides what to draw from one field.
 
 ### Presentation
 
-Exploratory answers render in the same two-column layout with a distinct
-treatment: a marked header, the generated expression shown expanded and never
-behind a click, the result table, the row count, and the frame that was read.
+Exploratory answers render in the same two-column layout, led by a warning in
+the strongest treatment the interface has: red, above the answer rather than
+below it, and impossible to read past. It says the answer did not come from a
+defined metric in the catalog, that the query was written by a model, and that
+the figure should be checked before being repeated.
+
+Under the warning: the generated expression shown expanded and never behind a
+click, the result table, the row count, and the frame that was read.
+
+The warning is the one place in this app where alarm is the correct register.
+Everywhere else the interface works to make caveats legible without making
+them frightening, because a leader who is alarmed by a partial-period notice
+stops reading notices. Here the risk is real and specific, a model wrote the
+query, so the treatment matches.
 
 The four detail sections stay as they are. Flags still run, so partial period,
 stale close dates, and the rest still apply to an exploratory answer, since
@@ -230,9 +286,13 @@ Covered through the primary seam:
 Promote-to-metric, which is V3 and is what the query log exists to feed.
 
 Writes of any kind. Joins the metric lane doesn't already make available.
-Region, permanently, on the grounds V1 recorded. Multi-turn refinement of a
-generated expression. Charts over exploratory results, since a chart implies a
-settled shape and these do not have one.
+Multi-turn refinement of a generated expression. Charts over exploratory
+results, since a chart implies a settled shape and these do not have one.
+
+Region and product line, permanently, on the grounds in Refused topics above.
+Both remain refusals in V2 even though the fallback lane could compute either
+of them, which is the point: a lane that can answer anything is exactly the
+lane most likely to answer something it shouldn't.
 
 ## Further Notes
 

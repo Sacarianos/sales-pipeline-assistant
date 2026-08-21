@@ -41,6 +41,17 @@ written by hand. Region questions refuse for this reason rather than picking
 one definition silently; segment carries no equivalent ambiguity.
 _Avoid_: territory, area
 
+**Product line**:
+One of three values recorded on every deal. The column is clean, with no nulls
+in either snapshot and an identical value set across both, and every
+cross-snapshot change belongs to an ID the reconciler classifies as reused.
+Product line questions refuse anyway, and for a different reason than region:
+each deal records exactly one product line, so any product-line total assigns
+that deal's whole value to a single product, and whether that attribution is
+right has never been agreed. The refusal says that rather than implying the
+data is bad, because it isn't.
+_Avoid_: product, SKU
+
 **Best case**:
 Closed-won revenue plus open pipeline for a period, both sides filtered to
 the same period by period membership. The ceiling that scope could still

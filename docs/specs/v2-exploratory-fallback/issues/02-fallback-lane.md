@@ -6,12 +6,23 @@
 reaches a generator, comes back as a pandas expression, runs through the
 sandbox, and returns an answer instead of a refusal.
 
-Precedence is the whole design here. Region short-circuits first, before any
-model call, exactly as it does today. The router runs next and a registered
-metric that validates always wins, because a metric encodes a business
-definition a human agreed to and a generated expression does not. Only then
-does the fallback attempt the question. If it declines or its expression fails
-validation, the system refuses with the catalog coverage hint the way V1 does.
+Precedence is the whole design here. Refused topics short-circuit first,
+before any model call: region as it does today, and product line joining it.
+The router runs next and a registered metric that validates always wins,
+because a metric encodes a business definition a human agreed to and a
+generated expression does not. Only then does the fallback attempt the
+question. If it declines or its expression fails validation, the system
+refuses with the catalog coverage hint the way V1 does.
+
+Product line refuses on attribution rather than on data quality, and the
+wording has to earn that distinction. The column is clean: no nulls in either
+snapshot, an identical value set across both, and every cross-snapshot change
+already classified as ID reuse. What is unsettled is that each deal records
+exactly one product line, so a product-line total assigns that deal's whole
+value to one product. The refusal computes its own count at load time, names
+the attribution question, and says the number is withheld pending a decision.
+A refusal implying bad data where the data is fine would be caught by the
+first analyst who looked, and would cost more trust than the number was worth.
 
 The generator sees column names, dtypes, and the distinct values of
 low-cardinality columns, in the same shape the router prompt already uses. It
@@ -35,10 +46,14 @@ type.
 
 **Status:** ready-for-agent
 
-- [ ] A product-line question answers in the fallback lane with a table
+- [ ] A loss-reason question answers in the fallback lane with a table
+- [ ] An account-level question answers in the fallback lane
 - [ ] A question a registered metric covers is answered by the metric lane,
       asserted by the lane marker
 - [ ] Region refuses and no generation is attempted
+- [ ] Product line refuses and no generation is attempted
+- [ ] The product-line refusal names attribution, not data quality, and quotes
+      a count computed at load time
 - [ ] A question needing a column nobody has refuses rather than answering
 - [ ] The generator prompt contains no data row
 - [ ] The lane exposes per-snapshot frames and no combined frame

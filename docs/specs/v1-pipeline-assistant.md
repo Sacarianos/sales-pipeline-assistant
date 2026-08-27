@@ -304,7 +304,7 @@ nearest-match guess, never a retry that loosens the constraint.
 
 ### Metrics
 
-Three metrics in V1, all returning the same result shape: a facts mapping, an
+Four metrics in V1, all returning the same result shape: a facts mapping, an
 aggregate table, the source rows, the literal filters applied, the snapshot that
 answered, the definition keys, and a deterministic template sentence.
 
@@ -315,11 +315,14 @@ Implemented metric and grouping pairs:
 | attainment | yes | yes | yes | yes |
 | risk | yes | no | yes | no |
 | comparison | yes | yes | no | no |
+| product_mix | yes | no | no | no |
 
 Risk is inherently per-rep. A segment-level or manager-level risk number would
 be a sum of rep best-cases against a summed quota, which hides the individual
 shortfall the metric exists to surface. Comparison ships overall and by segment
-in V1.
+in V1. Product mix answers overall only: it already breaks its answer out by
+every product line at once, the way risk breaks out by every rep, so there is
+no separate "by segment" or "by rep" slice to add on top of that.
 
 **Snapshot routing.** Questions about Q1 read the Q1 snapshot as reported and
 also compute the restated figure from the Q2 snapshot. Questions about Q2 read
@@ -339,6 +342,15 @@ closed nothing and pace would flag almost everyone.
 
 **Comparison** matches the same day of quarter rather than the same calendar
 date. Day 32 of Q2 is May 2 and day 32 of Q1 is February 1.
+
+**Product mix** is closed-won revenue and open pipeline for a period, split by
+product line, with no quota comparison, since this data records quota per rep
+and has no per-product breakdown to divide by. Every deal carries exactly one
+product-line tag, a verified fact with no nulls and an identical value set
+across both snapshots; whether that tag reflects a strict one-product-per-deal
+rule or a convention for recording a bundled deal is not something the file
+confirms either way, and the `product_line_attribution` flag says so on every
+answer rather than being a reason to withhold the number.
 
 There is no standalone deal-count metric. Counts appear as supporting facts
 inside currency answers.
@@ -568,12 +580,29 @@ values for the acceptance cases.
 - Region mismatches: 17 of 92.
 - Stale open deals as of 2026-05-02: two.
 - Closed-lost deals missing a loss reason: one of nine.
+- Q2 closed-won by product line: Analytics Add-on 138,000, Core Platform
+  295,000, Security Module 85,000, summing to the known 518,000 org total.
 
 ## Out of Scope
 
-Region questions, product line, and account-level questions. Forecasts and
-anything forward-looking. Any period outside Q1-2026 and Q2-2026. Multi-turn
+Region questions and account-level questions. Forecasts and anything
+forward-looking. Any period outside Q1-2026 and Q2-2026. Multi-turn
 follow-ups. Authentication. Write-back to any source system.
+
+Product line was excluded from the original V1 cut alongside region, on the
+same reasoning, and that reasoning does not hold up: region refuses because
+two definitions of it actively disagree in the data, while product line has
+no such disagreement to refuse over. Every deal carries exactly one clean
+`product_line` value, no nulls, identical value sets across both snapshots.
+The `product_mix` metric reports closed-won and open pipeline split by
+product line, with no quota comparison, since quotas in this data are
+recorded per rep and carry no product breakdown to divide by. The one real
+assumption, that a bundled deal (if one exists) would have its whole value
+assigned to a single tag, is disclosed on every answer by the
+`product_line_attribution` flag rather than used as a reason to withhold the
+number. Computing a number and disclosing its assumption is the position
+this project's whole design otherwise takes; refusing here was an
+inconsistency, not a cut earned by the data.
 
 Charts were excluded from the original V1 cut and are now in, one per metric,
 under a rule that keeps the exclusion's intent: the view layer computes

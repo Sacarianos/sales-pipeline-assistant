@@ -8,31 +8,34 @@ category: enhancement
 
 ## Problem Statement
 
-V1 answers three metrics and refuses everything else. The refusing is
+V1 refuses everything outside its registered metrics. The refusing is
 deliberate and it is most of why the tool is trustworthy, but one response
-currently covers three situations that deserve different answers.
+currently covers two situations that deserve different answers.
 
 Some questions are refused because the data cannot answer them honestly.
-Region is the case: the region on the deal and the region on the rep who owns
-it differ on 17 of 92 deals, so any single number picks a side silently. That
-refusal is the product working and it stays exactly as it is.
+Region is the case, and it is the only one: the region on the deal and the
+region on the rep who owns it differ on 17 of 92 deals, so any single number
+picks a side silently. That refusal is the product working and it stays
+exactly as it is.
 
-Some are refused because the number is computable but the method behind it has
-never been agreed. Product line is the case, and it is worth being precise
-about why, because the data itself is clean. There are no nulls in either
-snapshot, the value set is identical across both, and every cross-snapshot
-change is explained by ID reuse the reconciler already detects. What is not
-settled is attribution: every deal carries exactly one product line, so a
-product-line total assigns that deal's entire value to a single product. If
-deals span products, that overstates one and understates the others. Until
-somebody decides whether that attribution is right, the honest output is a
-refusal that says so.
+Everything else is refused only because nobody wrote a metric. Stage
+breakdowns, loss reasons, deal size distributions, account-level questions,
+rep tenure, and the long tail of one-off analysis are all unambiguous in this
+data. A sales leader asking "why are we losing deals?" gets told the system
+doesn't cover that, which is true and useless.
 
-The rest are refused only because nobody wrote a metric. Stage breakdowns,
-loss reasons, deal size distributions, account-level questions, rep tenure,
-and the long tail of one-off analysis are all unambiguous in this data. A
-sales leader asking "why are we losing deals?" gets told the system doesn't
-cover that, which is true and useless.
+An earlier draft of this spec put product line in a third category, refused
+because the number was computable but the attribution behind it had never
+been agreed. That category turned out not to survive scrutiny. Region refuses
+because two definitions measurably disagree, and there is nothing comparable
+for product line to disagree with: one clean tag per deal, no nulls, an
+identical value set across both snapshots. The attribution argument was an
+assumption about how software is sold rather than a finding in the data, and
+it was doing the work of a measurement without being one. Product line is now
+answered by the `product_mix` metric, which computes the split and discloses
+the bundling assumption as a flag rather than withholding the number over it.
+The lesson generalized: a refusal has to be earned by the data, and the fact
+that one sounds like another is not evidence that it is.
 
 A registry cannot grow fast enough to cover ad-hoc analysis, and a leader who
 hits three refusals in a row stops asking, which is the same outcome the old
@@ -58,8 +61,8 @@ stated in the strongest terms the interface has. A reader should never have to
 guess which lane answered them, and the one that carries more risk is the one
 that says so loudest.
 
-Region and product line both stay refused ahead of both lanes, each with its
-own reason computed from the data rather than quoted from a written string.
+Region stays refused ahead of both lanes, with its reason computed from the
+data rather than quoted from a written string.
 
 ## User Stories
 
@@ -77,9 +80,9 @@ own reason computed from the data rather than quoted from a written string.
 5. As a sales leader, I want region to keep refusing even though the fallback
    could compute it, so that a deliberate decision isn't quietly reversed by a
    new feature.
-6. As a sales leader, I want product line to refuse with the attribution
-   problem named, so that I understand a number was withheld on purpose rather
-   than missing by accident.
+6. As a sales leader, I want a question a registered metric covers to be
+   answered by that metric rather than by generated code, so that a defined
+   business meaning always beats an improvised one.
 7. As a sales leader, I want to be told when a question can't be answered from
    the columns that exist, so that I learn the boundary rather than receive a
    confident answer about data nobody has.
@@ -104,8 +107,8 @@ own reason computed from the data rather than quoted from a written string.
 
 Four steps, in order, and the first that applies wins:
 
-1. Refused topics short-circuit, before any model call. Region does this
-   today; product line joins it.
+1. Refused topics short-circuit, before any model call. Region is the only
+   one.
 2. The router runs against the catalog. A registered metric that validates
    answers in the metric lane, unchanged from V1.
 3. Otherwise the fallback lane attempts the question.
@@ -123,27 +126,20 @@ downstream because the substituted value is a real one.
 
 ### Refused topics
 
-Two topics refuse permanently, and they refuse for different reasons. Both
-reasons are computed at load time rather than typed into a string, so neither
-can go stale against the data.
+One topic refuses permanently. Its reason is computed at load time rather
+than typed into a string, so it cannot go stale against the data.
 
 **Region** refuses because two definitions of it disagree. The deal carries
 one, the rep who owns the deal carries another, and they differ on 17 of 92
 deals in the current snapshot. Unchanged from V1.
 
-**Product line** refuses because attribution has never been agreed. The data
-is clean, which is exactly why the refusal has to say something truthful
-rather than imply a defect: there are no nulls in either snapshot, the value
-set is identical across both, and all seven cross-snapshot changes belong to
-IDs the reconciler already classifies as reused. The problem is that every
-deal records exactly one product line, so any product-line total assigns that
-deal's whole value to a single product. The refusal reports how many deals
-carry exactly one product line, names the attribution question, and says the
-number is withheld pending a decision rather than missing.
-
-This distinction matters more than it looks. A refusal that implies bad data
-where the data is fine is its own kind of dishonesty, and it would be caught
-by the first analyst who checked.
+The mechanism stays a table rather than a single hardcoded check, because the
+next genuinely ambiguous column should be one entry rather than a refactor.
+The table is deliberately hard to add to: an entry needs a measured
+contradiction in the data, not a plausible story about one. Product line was
+added to it and then removed for exactly that reason, which is recorded in
+the Problem Statement above and is the clearest test of the rule this system
+has.
 
 Account-level questions were listed out of scope in V1 and are now answerable
 through the fallback lane, since accounts carry no equivalent ambiguity.
@@ -289,10 +285,10 @@ Writes of any kind. Joins the metric lane doesn't already make available.
 Multi-turn refinement of a generated expression. Charts over exploratory
 results, since a chart implies a settled shape and these do not have one.
 
-Region and product line, permanently, on the grounds in Refused topics above.
-Both remain refusals in V2 even though the fallback lane could compute either
-of them, which is the point: a lane that can answer anything is exactly the
-lane most likely to answer something it shouldn't.
+Region, permanently, on the grounds in Refused topics above. It remains a
+refusal in V2 even though the fallback lane could compute it, which is the
+point: a lane that can answer anything is exactly the lane most likely to
+answer something it shouldn't.
 
 ## Further Notes
 

@@ -29,8 +29,8 @@ def ask(question: str, data: Data, client: object | None = None) -> Answer:
     # covers must never fall through to generated code, since the metric
     # encodes a definition a human agreed to and a generated expression does
     # not. Only an intent the router itself couldn't match, and that isn't
-    # one of the topics refused ahead of routing (region, product line),
-    # reaches the fallback lane at all.
+    # a topic refused ahead of routing (region), reaches the fallback lane
+    # at all.
     if intent.is_unsupported() and not routing.refused_topic:
         exploratory = fallback.attempt(question, data, client)
         if exploratory is not None:

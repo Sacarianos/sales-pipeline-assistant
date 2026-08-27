@@ -42,14 +42,16 @@ one definition silently; segment carries no equivalent ambiguity.
 _Avoid_: territory, area
 
 **Product line**:
-One of three values recorded on every deal. The column is clean, with no nulls
-in either snapshot and an identical value set across both, and every
-cross-snapshot change belongs to an ID the reconciler classifies as reused.
-Product line questions refuse anyway, and for a different reason than region:
-each deal records exactly one product line, so any product-line total assigns
-that deal's whole value to a single product, and whether that attribution is
-right has never been agreed. The refusal says that rather than implying the
-data is bad, because it isn't.
+One of three values recorded on every deal. Unlike region, this is not two
+definitions disagreeing: the column is clean, no nulls, an identical value
+set across both snapshots. The `product_mix` metric reports closed-won and
+open pipeline split by product line, with no quota comparison, since quotas
+in this data are recorded per rep with no product breakdown to divide by.
+The one real assumption is that each deal carries exactly one product-line
+tag, so a bundled deal, if one exists, would have its whole value counted
+toward a single product line. Nothing in this data confirms whether that
+happens; the `product_line_attribution` flag says so on every answer rather
+than the number being withheld over it.
 _Avoid_: product, SKU
 
 **Best case**:

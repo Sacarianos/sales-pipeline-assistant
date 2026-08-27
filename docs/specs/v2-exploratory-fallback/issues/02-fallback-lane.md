@@ -7,22 +7,20 @@ reaches a generator, comes back as a pandas expression, runs through the
 sandbox, and returns an answer instead of a refusal.
 
 Precedence is the whole design here. Refused topics short-circuit first,
-before any model call: region as it does today, and product line joining it.
-The router runs next and a registered metric that validates always wins,
-because a metric encodes a business definition a human agreed to and a
-generated expression does not. Only then does the fallback attempt the
-question. If it declines or its expression fails validation, the system
-refuses with the catalog coverage hint the way V1 does.
+before any model call, region being the only one. The router runs next and a
+registered metric that validates always wins, because a metric encodes a
+business definition a human agreed to and a generated expression does not.
+Only then does the fallback attempt the question. If it declines or its
+expression fails validation, the system refuses with the catalog coverage
+hint the way V1 does.
 
-Product line refuses on attribution rather than on data quality, and the
-wording has to earn that distinction. The column is clean: no nulls in either
-snapshot, an identical value set across both, and every cross-snapshot change
-already classified as ID reuse. What is unsettled is that each deal records
-exactly one product line, so a product-line total assigns that deal's whole
-value to one product. The refusal computes its own count at load time, names
-the attribution question, and says the number is withheld pending a decision.
-A refusal implying bad data where the data is fine would be caught by the
-first analyst who looked, and would cost more trust than the number was worth.
+Product line was briefly a second refused topic and is not one. Region
+refuses because two definitions of it measurably disagree; product line had
+nothing to disagree with, so the refusal rested on an assumption about
+bundled deals rather than on the data. It is answered by the `product_mix`
+metric now, which puts it in the metric lane and makes it a useful check on
+precedence: a question a registered metric covers must reach that metric and
+never the generator.
 
 The generator sees column names, dtypes, and the distinct values of
 low-cardinality columns, in the same shape the router prompt already uses. It
@@ -51,9 +49,8 @@ type.
 - [x] A question a registered metric covers is answered by the metric lane,
       asserted by the lane marker
 - [x] Region refuses and no generation is attempted
-- [x] Product line refuses and no generation is attempted
-- [x] The product-line refusal names attribution, not data quality, and quotes
-      a count computed at load time
+- [x] Product line is answered by the `product_mix` metric in the metric lane,
+      never refused and never handed to the generator
 - [x] A question needing a column nobody has refuses rather than answering
 - [x] The generator prompt contains no data row
 - [x] The lane exposes per-snapshot frames and no combined frame
@@ -67,13 +64,13 @@ type.
 for every reason the lane can't answer (no client, unreachable API, a
 decline, a rejected expression), which is the one thing `pipeline.py` checks
 before falling through to the ordinary catalog refusal — the lane never
-refuses on its own, it only answers or steps aside. Region and product line
-were generalized in `router.py` into one `RefusedTopic` shape (label, word
+refuses on its own, it only answers or steps aside. Refused topics were
+generalized in `router.py` into one `RefusedTopic` shape (label, word
 pattern, catalog values, a reason method) walked as a small registry in
-`route()`, replacing what would otherwise have been two structurally
-identical `_mentions_*`/`*_intent` pairs — caught in code review as real
-duplication, not a style nit, since `_match_value` already generalizes this
-exact shape elsewhere in the same file. Facts are derived generically from
+`route()`. That generalization was written when there were two entries,
+region and product line; product line has since been removed, and the shape
+was kept anyway because what it captures is the mechanics of a pre-routing
+refusal rather than any particular reason for one. Facts are derived generically from
 whatever shape the sandboxed result takes: a row-count Fact always exists
 for a tabular result regardless of size, and per-row Facts join it only up
 to `FACT_ROW_CAP` (8) rows, so a large result can still be narrated by its
@@ -101,7 +98,12 @@ them into "4 of 8" and got correctly blocked to the template. Neither is a
 defect; both are the verifier working exactly as designed on a lane where
 the interpretation, not just the arithmetic, is model-generated.
 
-16 tests in `tests/test_fallback_lane.py`, 158 passing overall. Reviewed via
-`/code-review` on both axes; the sandbox mutual-exclusion gap (shared with
-issue 01), the discarded `restated`, and the router duplication were all
-fixed in response.
+15 tests in `tests/test_fallback_lane.py`. Reviewed via `/code-review` on
+both axes; the sandbox mutual-exclusion gap (shared with issue 01), the
+discarded `restated`, and the router duplication were all fixed in response.
+
+Later, on merging main into this branch: main had reversed product line into
+the `product_mix` metric, so the refused-topic entry, its catalog reason
+method, and the load-time count it quoted were all removed here, and the two
+tests asserting the refusal became one asserting product line answers in the
+metric lane instead. 172 passing after the merge.

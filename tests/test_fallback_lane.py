@@ -1,5 +1,5 @@
-"""Issue 02: the exploratory fallback lane, and the region/product-line
-refusals that short-circuit ahead of it.
+"""Issue 02: the exploratory fallback lane, and the region refusal that
+short-circuits ahead of it.
 
 Per the parent spec's testing decisions, most of this goes in through the
 primary seam - `ask(question, data, client)` - and asserts on what reaches
@@ -157,22 +157,24 @@ def test_region_refuses_and_no_generation_is_attempted(data):
     assert client.calls == []
 
 
-def test_product_line_refuses_and_no_generation_is_attempted(data):
-    client = FallbackStubClient(router_input=_unsupported_input(), plan_input={"expression": "1"})
-    answer = ask("how is our pipeline broken out by product line", data, client)
+def test_product_line_is_answered_by_the_metric_lane_not_refused(data):
+    """Product line was briefly a refused topic here, short-circuiting ahead
+    of the fallback lane on the same footing as region. It isn't one.
 
-    assert isinstance(answer, Refused)
-    assert client.calls == []
-
-
-def test_product_line_refusal_names_attribution_not_data_quality(data):
+    Region refuses because two definitions of it measurably disagree, on 17
+    of 92 deals. Product line has no second definition to disagree with, so
+    the refusal was resting on an assumption about bundled deals rather than
+    on anything in the data. It has its own metric now, with that assumption
+    disclosed as a flag, and this pins both halves of that: it answers, and
+    it answers from the registry rather than falling through to generated
+    code, since a question a metric covers must never reach the fallback.
+    """
     answer = ask("how is our pipeline broken out by product line", data)
 
-    assert isinstance(answer, Refused)
-    assert "attribution" in answer.reason.lower()
-    assert str(data.product_line_deal_count) in answer.reason
-    assert "missing" not in answer.reason.lower()
-    assert "null" not in answer.reason.lower()
+    assert isinstance(answer, Answered)
+    assert answer.intent.metric == "product_mix"
+    assert answer.lane == "metric"
+    assert any(flag.kind == "product_line_attribution" for flag in answer.flags)
 
 
 def test_a_question_needing_a_column_nobody_has_refuses_rather_than_answering(data):

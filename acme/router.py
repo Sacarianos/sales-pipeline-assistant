@@ -18,12 +18,14 @@ substituting the nearest segment or rep - a substitution validation can't
 catch, since the substituted value would be a real one. Catching it here,
 ahead of both routers, means it can't happen regardless of which one answers.
 
-Product line joins region here in V2, for a different reason: the data is
-clean, but every deal records exactly one product line, so a product-line
-total settles an attribution question nobody has agreed on. Both refused
-topics short-circuit ahead of the fallback lane too, so a lane that can
-answer almost anything never becomes the thing that answers the two
-questions the system has deliberately decided not to.
+Product line was briefly refused here alongside region, and is not any
+more. Region refuses because two definitions of it measurably disagree.
+Product line has no second definition to disagree with, so the refusal was
+resting on an assumption about bundled deals rather than on anything in the
+data, and it now has its own metric with that assumption disclosed as a
+flag. What survives is the rule: a refused topic short-circuits ahead of
+the fallback lane too, so a lane that can answer almost anything never
+becomes the thing that answers a question the system deliberately withheld.
 """
 
 from __future__ import annotations
@@ -77,8 +79,8 @@ Mode = Literal["online", "offline"]
 class Routing:
     intent: Intent
     mode: Mode
-    # True for region and product line: topics refused ahead of routing
-    # entirely. The pipeline reads this to know a question is refused on
+    # True for a topic refused ahead of routing entirely, region being the
+    # only one. The pipeline reads this to know a question is refused on
     # principle rather than merely unmatched, which is what stops it from
     # ever handing a refused topic to the fallback lane.
     refused_topic: bool = False
@@ -269,12 +271,14 @@ def restate(
 @dataclass(frozen=True)
 class RefusedTopic:
     """A topic refused before either router runs, ahead of the fallback
-    lane too. One shape covers region and product line despite their
-    reasons differing (two conflicting definitions versus an unsettled
-    attribution question), because the shape being generalized here is the
-    mechanics of the refusal — detect, restate, quote a reason computed at
-    load time — not the reason itself, which stays each topic's own method
-    on `Catalog`.
+    lane too.
+
+    Region is the only entry today, and the shape stays generalized anyway
+    because what it captures is the mechanics of a pre-routing refusal:
+    detect the topic, restate the question, quote a reason computed at load
+    time. The reason itself stays each topic's own method on `Catalog`,
+    since reasons do not generalize and pretending they do is how product
+    line briefly ended up refused on region's logic.
     """
 
     label: str
@@ -289,12 +293,6 @@ REFUSED_TOPICS: tuple[RefusedTopic, ...] = (
         word_pattern=r"\bregions?\b",
         values=lambda catalog: catalog.regions,
         reason=lambda catalog: catalog.region_refusal_reason(),
-    ),
-    RefusedTopic(
-        label="product line",
-        word_pattern=r"\bproduct lines?\b",
-        values=lambda catalog: catalog.product_lines,
-        reason=lambda catalog: catalog.product_line_refusal_reason(),
     ),
 )
 
@@ -471,13 +469,12 @@ def route_online(question: str, catalog: Catalog, client: object) -> Routing:
 def route(question: str, catalog: Catalog, client: object | None = None) -> Routing:
     """Route online with the model, falling back to the offline keyword router.
 
-    Refused topics (region, product line) are checked before either router
-    runs and short-circuit both, since the one wrong move available to a
-    model asked about one is silently substituting a nearby value or
-    computing a number the system has deliberately withheld - a
-    substitution or computation validation has no way to catch, because the
-    result would look like a real answer. `refused_topic=True` here is also
-    what stops the pipeline from ever handing the topic to the fallback lane.
+    Refused topics, region being the only one, are checked before either
+    router runs and short-circuit both, since the one wrong move available
+    to a model asked about one is silently substituting a nearby value - a
+    substitution validation has no way to catch, because the substituted
+    value would be a real one. `refused_topic=True` here is also what stops
+    the pipeline from ever handing the topic to the fallback lane.
     """
     for topic in REFUSED_TOPICS:
         if _mentions_topic(question, topic, catalog):

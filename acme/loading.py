@@ -51,7 +51,6 @@ class Data:
     as_of: date
     region_mismatch_count: int
     region_deal_count: int
-    product_line_deal_count: int
     change_log: pd.DataFrame
     divergence: Divergence
 
@@ -142,14 +141,6 @@ def load_data(
     region_mismatch_count = int((current["region"] != current["rep_region"]).sum())
     region_deal_count = int(len(current))
 
-    # Every deal carries exactly one product_line value in this data — this
-    # count is always the full deal count, and it stays a computed count
-    # rather than a hardcoded one for the same reason region's is: so a
-    # future snapshot that ever did carry a null wouldn't go unnoticed.
-    # Product line refuses on attribution, not on this being wrong, which is
-    # the whole point of computing it instead of asserting it.
-    product_line_deal_count = int(current["product_line"].notna().sum())
-
     change_log = reconcile(snapshots["Q1"], snapshots["Q2"])
     q1_divergence = _divergence(snapshots["Q1"], snapshots["Q2"])
 
@@ -161,7 +152,6 @@ def load_data(
         as_of=as_of,
         region_mismatch_count=region_mismatch_count,
         region_deal_count=region_deal_count,
-        product_line_deal_count=product_line_deal_count,
         change_log=change_log,
         divergence=q1_divergence,
     )

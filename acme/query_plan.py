@@ -162,6 +162,10 @@ class QueryPlan(BaseModel):
     descending: bool = True
     limit: int | None = None
     decline_reason: str | None = None
+    # True when this plan refines the previous exploratory plan in the
+    # conversation, like "just for Enterprise". The answer then says what
+    # changed. Never read by the checker or the runner.
+    refines_previous: bool = False
 
 
 @dataclass(frozen=True)
@@ -483,14 +487,70 @@ def _describe(plan: QueryPlan, schema: FrameSchema) -> str:
     if plan.group_by:
         text += ", grouped by " + " and ".join(_human(c) for c in plan.group_by)
     if plan.sort_by is not None:
-        if plan.sort_by == RESULT:
-            text += f", sorted by the result, {_order_text(None, plan.descending)}"
-        else:
-            kind = schema.columns[plan.sort_by].kind
-            text += f", sorted by {_human(plan.sort_by)}, {_order_text(kind, plan.descending)}"
+        text += ", " + _sort_text(plan, schema)
     if plan.limit is not None:
         text += f", {'top' if plan.sort_by is not None else 'first'} {plan.limit}"
     return text + "."
+
+
+def _sort_text(plan: QueryPlan, schema: FrameSchema) -> str:
+    if plan.sort_by == RESULT:
+        return f"sorted by the result, {_order_text(None, plan.descending)}"
+    kind = schema.columns[plan.sort_by].kind
+    return f"sorted by {_human(plan.sort_by)}, {_order_text(kind, plan.descending)}"
+
+
+def _filter_key(spec: Filter) -> tuple:
+    return (spec.column, spec.op, repr(spec.value))
+
+
+def describe_change(before: dict, after: dict, schemas: dict[str, FrameSchema]) -> str:
+    """What changed from one plan to the next, in plain English.
+
+    Built from the two plans, never from model prose, so a refinement shows
+    the reader exactly what it did to the last query. Both plans have
+    already passed the checker, so every column they name is in `schemas`.
+    """
+    old, new = QueryPlan(**before), QueryPlan(**after)
+    old_schema, new_schema = schemas[old.frame], schemas[new.frame]
+    parts = []
+
+    if new.frame != old.frame:
+        parts.append(f"now reads {new_schema.scope} instead of {old_schema.scope}")
+
+    old_filters = {_filter_key(f): f for f in old.filters}
+    new_filters = {_filter_key(f): f for f in new.filters}
+    for key, spec in new_filters.items():
+        if key not in old_filters:
+            parts.append("added " + _filter_text(new_schema.columns[spec.column], spec, new_schema.noun))
+    for key, spec in old_filters.items():
+        if key not in new_filters:
+            parts.append("removed " + _filter_text(old_schema.columns[spec.column], spec, old_schema.noun))
+
+    if new.aggregate != old.aggregate:
+        if new.aggregate is None:
+            parts.append("now lists rows")
+        else:
+            label = _result_label(new, new_schema)
+            parts.append(f"now computes {label[0].lower()}{label[1:]}")
+
+    shape = []
+    if new.group_by != old.group_by:
+        shape.append(
+            "grouped by " + " and ".join(_human(c) for c in new.group_by) if new.group_by else "not grouped"
+        )
+    if new.columns != old.columns and new.columns:
+        shape.append("showing " + ", ".join(_human(c) for c in new.columns))
+    if (new.sort_by, new.descending) != (old.sort_by, old.descending):
+        shape.append(_sort_text(new, new_schema) if new.sort_by is not None else "not sorted")
+    if new.limit != old.limit:
+        shape.append(f"top {new.limit}" if new.limit is not None else "not limited")
+    if shape:
+        parts.append("now " + ", ".join(shape))
+
+    if not parts:
+        return "Same query as your last one."
+    return "Changed from your last query: " + "; ".join(parts) + "."
 
 
 # --- entry points ---------------------------------------------------------
@@ -612,6 +672,13 @@ def tool_schema(schemas: dict[str, FrameSchema]) -> dict:
                     "Leave every other field out when you set this."
                 ),
             },
+            "refines_previous": {
+                "type": "boolean",
+                "description": (
+                    "True when this plan is the previous plan in the conversation "
+                    "with only the change the question asks for."
+                ),
+            },
         },
     }
 
@@ -626,6 +693,7 @@ __all__ = [
     "PlanRejection",
     "QueryPlan",
     "QueryResult",
+    "describe_change",
     "describe_frames",
     "run",
     "tool_schema",

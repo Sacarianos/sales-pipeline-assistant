@@ -32,10 +32,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Callable, Literal
+from typing import Callable, Literal, Sequence
 
 from .catalog import Catalog
 from .config import ROUTER_MODEL
+from .conversation import Turn, prompt_for
 from .domain import UNSUPPORTED, Intent
 from .periods import period_of
 
@@ -449,10 +450,10 @@ def _system_prompt(catalog: Catalog) -> str:
         "substitute the closest match - refusing is cheap, a wrong route is "
         "expensive. Set `unsupported_kind` to 'no_metric' when no metric above "
         "covers it.\n"
-        "- If the question asks for a metric above at a grouping it doesn't "
-        "answer at, still set that metric and the grouping asked for. The "
-        "system explains the limit. Never mark it unsupported, since another "
-        "part of the system would then improvise the metric.\n"
+        "- If a metric above covers the question but not at the grouping or "
+        "breakdown it asks for, like risk by segment, set metric to "
+        "'unsupported', `unsupported_kind` to 'metric_limit', and say in "
+        "`unsupported_reason` which groupings it does answer at.\n"
         "- If a name or phrase in the question matches more than one segment, "
         "rep, or manager, set metric to 'unsupported', `unsupported_kind` to "
         "'ambiguous', and name every match in `unsupported_reason`. Never "
@@ -460,10 +461,24 @@ def _system_prompt(catalog: Catalog) -> str:
         "- `restated` is one sentence restating how you read the question. It "
         "renders directly to the user, so a wrong reading has to be visible in "
         "it alone.\n"
+        "- For comparison, always set comparison_period to the earlier period "
+        "being compared against, even when the question leaves it implied.\n"
+        "- Earlier questions in the conversation may come before the question, "
+        "each with how it was read. If the question only makes sense as a "
+        "follow-up, like 'what about SMB' or 'and in Q1', fill every field by "
+        "carrying over the most recent reading and changing only what the "
+        "question changes. Set follows_up to true and start `restated` with "
+        "'Following on from your last question, reading this as'. A question "
+        "that stands on its own is read on its own and never inherits earlier "
+        "filters. If it's unclear which earlier question a follow-up refers "
+        "to, set metric to 'unsupported' and `unsupported_kind` to "
+        "'ambiguous'.\n"
     )
 
 
-def route_online(question: str, catalog: Catalog, client: object) -> Routing:
+def route_online(
+    question: str, catalog: Catalog, client: object, history: Sequence[Turn] = ()
+) -> Routing:
     """The Anthropic tool-use router: tool choice forced to the one tool."""
     message = client.messages.create(
         model=ROUTER_MODEL,
@@ -479,13 +494,18 @@ def route_online(question: str, catalog: Catalog, client: object) -> Routing:
             }
         ],
         tool_choice={"type": "tool", "name": TOOL_NAME},
-        messages=[{"role": "user", "content": question}],
+        messages=[{"role": "user", "content": prompt_for(question, history)}],
     )
     block = next(b for b in message.content if getattr(b, "type", None) == "tool_use")
     return Routing(intent=Intent(**block.input), mode="online")
 
 
-def route(question: str, catalog: Catalog, client: object | None = None) -> Routing:
+def route(
+    question: str,
+    catalog: Catalog,
+    client: object | None = None,
+    history: Sequence[Turn] = (),
+) -> Routing:
     """Route online with the model, falling back to the offline keyword router.
 
     Refused topics, region being the only one, are checked before either
@@ -494,6 +514,10 @@ def route(question: str, catalog: Catalog, client: object | None = None) -> Rout
     substitution validation has no way to catch, because the substituted
     value would be a real one. `refused_topic=True` here is also what stops
     the pipeline from ever handing the topic to the fallback lane.
+
+    Refused topics are checked on the question alone, before `history` is
+    consulted, so "what about the West?" refuses however it follows on. The
+    offline router ignores `history` and reads each question on its own.
     """
     for topic in REFUSED_TOPICS:
         if _mentions_topic(question, topic, catalog):
@@ -506,7 +530,7 @@ def route(question: str, catalog: Catalog, client: object | None = None) -> Rout
 
     if client is not None:
         try:
-            return route_online(question, catalog, client)
+            return route_online(question, catalog, client, history)
         except Exception:
             pass
 

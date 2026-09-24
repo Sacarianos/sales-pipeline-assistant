@@ -122,7 +122,7 @@ def find_candidates(records: list[LogRecord], data: Data) -> list[Candidate]:
         key = json.dumps(template, sort_keys=True)
         group = groups.setdefault(key, {"template": template, "count": 0, "questions": [], "scope": {}})
         group["count"] += 1
-        if record.question not in group["questions"]:
+        if not record.follows_up and record.question not in group["questions"]:
             group["questions"].append(record.question)
         for field, value in scope.items():
             seen = group["scope"].setdefault(field, [])

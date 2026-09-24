@@ -277,3 +277,26 @@ def test_a_trusted_column_still_needs_text():
     outcome = run(plan, FRAMES, SCHEMAS, trusted_columns=frozenset({"segment"}))
     assert isinstance(outcome, PlanRejection)
     assert "needs text" in outcome.reason
+
+
+def test_a_change_between_two_plans_reads_as_plain_english():
+    from acme.query_plan import describe_change
+
+    before = {"frame": "deals", "filters": [{"column": "stage", "op": "eq", "value": "Closed Lost"}], "aggregate": {"function": "count"}}
+    added = {**before, "filters": [*before["filters"], {"column": "segment", "op": "eq", "value": "SMB"}]}
+    assert describe_change(before, added, SCHEMAS) == "Changed from your last query: added segment is SMB."
+
+    regrouped = {**before, "group_by": ["segment"], "sort_by": "result"}
+    assert describe_change(before, regrouped, SCHEMAS) == (
+        "Changed from your last query: now grouped by segment, sorted by the result, highest first."
+    )
+
+    swapped = {**before, "filters": [{"column": "stage", "op": "eq", "value": "Closed Won"}]}
+    assert describe_change(before, swapped, SCHEMAS) == (
+        "Changed from your last query: added stage is Closed Won; removed stage is Closed Lost."
+    )
+
+    summed = {**before, "aggregate": {"function": "sum", "column": "deal_value"}}
+    assert describe_change(before, summed, SCHEMAS) == "Changed from your last query: now computes total deal value."
+
+    assert describe_change(before, before, SCHEMAS) == "Same query as your last one."

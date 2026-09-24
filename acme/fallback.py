@@ -21,11 +21,13 @@ the plan entirely.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Sequence
 
 import pandas as pd
 from pydantic import ValidationError
 
 from .config import ROUTER_MODEL
+from .conversation import Turn, last_plan, prompt_for
 from .domain import Answered, Fact, Unit
 from .flags import evaluate_for_snapshot
 from .loading import Data
@@ -38,6 +40,7 @@ from .query_plan import (
     PlanRejection,
     QueryPlan,
     QueryResult,
+    describe_change,
     describe_frames,
     run,
     tool_schema,
@@ -148,7 +151,7 @@ def _system_prompt(data: Data) -> str:
     )
 
 
-def _generate(question: str, data: Data, client: object) -> dict | None:
+def _generate(question: str, data: Data, client: object, history: Sequence[Turn]) -> dict | None:
     """The generator's raw tool input, or `None` on any API failure."""
     try:
         message = client.messages.create(
@@ -163,7 +166,7 @@ def _generate(question: str, data: Data, client: object) -> dict | None:
                 }
             ],
             tool_choice={"type": "tool", "name": TOOL_NAME},
-            messages=[{"role": "user", "content": question}],
+            messages=[{"role": "user", "content": prompt_for(question, history)}],
         )
         block = next(b for b in message.content if getattr(b, "type", None) == "tool_use")
         return dict(block.input)
@@ -249,6 +252,8 @@ def attempt(
     *,
     router_mode: str = "online",
     log: QueryLog | None = None,
+    history: Sequence[Turn] = (),
+    follows_up: bool = False,
 ) -> Answered | Declined | None:
     """Try to answer `question` from the fallback lane.
 
@@ -260,9 +265,9 @@ def attempt(
 
     def record(outcome: Outcome, **fields) -> None:
         if log is not None:
-            log.append(LogRecord(question=question, outcome=outcome, **fields))
+            log.append(LogRecord(question=question, outcome=outcome, follows_up=follows_up, **fields))
 
-    raw = _generate(question, data, client)
+    raw = _generate(question, data, client, history)
     if raw is None:
         record("unavailable", reason="the generator call failed")
         return None
@@ -272,6 +277,7 @@ def attempt(
         reason = f"the query written for it didn't match the plan format: {exc.errors()[0]['msg']}"
         record("rejected", plan=raw, reason=reason)
         return Declined(reason)
+    follows_up = follows_up or plan.refines_previous
     if plan.decline_reason:
         record("declined", reason=plan.decline_reason)
         return Declined(plan.decline_reason)
@@ -282,6 +288,12 @@ def attempt(
         verb = "failed" if outcome.ran else "was rejected"
         return Declined(f"the query written for it {verb}: {outcome.reason}")
     record("answered", plan=raw, matched_rows=outcome.matched_rows, row_count=outcome.row_count)
+
+    # What ran, as the next question in the conversation will see it, and
+    # what changed from the plan this one refined.
+    ran = plan.model_dump(exclude_defaults=True, exclude={"decline_reason", "refines_previous"})
+    previous = last_plan(history)
+    change = describe_change(previous, ran, schemas(data)) if plan.refines_previous and previous else ""
 
     facts = facts_for(plan, outcome)
     table = display_table(outcome.value)
@@ -310,6 +322,8 @@ def attempt(
         lane="exploratory",
         expression=outcome.code,
         query_description=outcome.description,
+        plan=ran,
+        change_from_previous=change,
         restated=restated,
         prose=narration.prose,
         prose_source=narration.source,
@@ -320,7 +334,7 @@ def attempt(
         facts=facts,
         flags=flags,
         table=table,
-        source_rows=table,
+        source_rows=outcome.rows,
         filters=filters,
         snapshot=snapshot,
         intent=None,

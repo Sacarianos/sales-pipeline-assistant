@@ -112,6 +112,13 @@ rep. It is left out of every query plan's schema, and a plan naming one is
 rejected, so the fallback lane can't answer a refused topic under another name.
 _Avoid_: hidden field, blocked column
 
+**Follow-up**:
+A question read in light of the earlier questions in the conversation, like
+"what about SMB?". It resolves to a complete reading of its own, restated to
+say what it carried over. The models remember how each earlier question was
+read, never what it answered.
+_Avoid_: context, chat history (when meaning what the models are given)
+
 **Promoted metric**:
 A registered metric made from a query plan that kept recurring in the query
 log. A person names it, writes its definition, and picks its groupings. The

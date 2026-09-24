@@ -83,8 +83,17 @@ class Intent(BaseModel):
     # it but no registered metric does, so the exploratory lane may try.
     # 'ambiguous' means the question could mean more than one thing, so
     # nothing tries: guessing which is exactly the silent substitution this
-    # system refuses.
-    unsupported_kind: Literal["no_metric", "ambiguous"] | None = Field(default=None)
+    # system refuses. 'metric_limit' means a metric covers it, but not at the
+    # grouping asked for, so nothing tries either: the exploratory lane would
+    # improvise a second definition of a metric that already has one.
+    unsupported_kind: Literal["no_metric", "ambiguous", "metric_limit"] | None = Field(default=None)
+    follows_up: bool = Field(
+        default=False,
+        description=(
+            "True when the question only makes sense following an earlier one "
+            "in the conversation, like 'what about SMB'."
+        ),
+    )
 
     def is_unsupported(self) -> bool:
         return self.metric == UNSUPPORTED
@@ -143,6 +152,10 @@ class Answered:
     # the reader. `expression` is the equivalent pandas an analyst can paste
     # into a notebook to reproduce the figure.
     query_description: str = ""
+    # The plan that ran, so a later question in the conversation can refine
+    # it, and what changed from the plan it refined, if it refined one.
+    plan: dict | None = None
+    change_from_previous: str = ""
     expression: str = ""
     # The one sentence restating how the question was read, rendered inside
     # the answer itself. For the metric lane this is `intent.restated`; the

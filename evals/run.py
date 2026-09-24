@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, TextIO
 
+from acme.conversation import remember, turn
 from acme.loading import Data, load_data
 from acme.pipeline import ask
 from acme.query_log import QueryLog
@@ -40,6 +41,9 @@ class RecordingClient:
     def __init__(self, inner: object):
         self._inner = inner
         self.calls: list[tuple[str, int, int]] = []
+        # What the router's tool call said, even when the answer that comes
+        # back carries no intent, as exploratory answers don't.
+        self.router_reading: dict | None = None
         self.messages = self
 
     def create(self, **kwargs):
@@ -50,6 +54,9 @@ class RecordingClient:
         except Exception:
             self.calls.append((name, 0, 0))
             raise
+        if name == "route_question":
+            block = next((b for b in response.content if getattr(b, "type", None) == "tool_use"), None)
+            self.router_reading = dict(block.input) if block is not None else None
         usage = getattr(response, "usage", None)
         self.calls.append(
             (name, getattr(usage, "input_tokens", 0) or 0, getattr(usage, "output_tokens", 0) or 0)
@@ -85,10 +92,16 @@ def _lane(answer) -> str:
 
 
 def run_case(case: Case, run: int, data: Data, client: object, log_dir: Path) -> CaseResult:
+    # The earlier questions build the conversation. They aren't scored or
+    # counted, only the final answer is.
+    history = []
+    for earlier in case.before:
+        history.append(turn(earlier, ask(earlier, data, client, history=remember(history))))
+
     recorder = RecordingClient(client)
     log = QueryLog(log_dir / f"{case.id}-{run}.jsonl")
     started = time.perf_counter()
-    answer = ask(case.question, data, recorder, log=log)
+    answer = ask(case.question, data, recorder, log=log, history=remember(history))
     seconds = time.perf_counter() - started
 
     records = log.records()
@@ -123,7 +136,7 @@ def run_case(case: Case, run: int, data: Data, client: object, log_dir: Path) ->
         narration=narration,
         plan=plan,
         text=text,
-        intent=None if answer.intent is None else answer.intent.model_dump(exclude_none=True),
+        intent=recorder.router_reading or (None if answer.intent is None else answer.intent.model_dump(exclude_none=True)),
         blocked_draft=draft,
         unmatched=tuple(unmatched),
     )

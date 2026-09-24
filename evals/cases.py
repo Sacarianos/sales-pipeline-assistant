@@ -45,6 +45,9 @@ class Case:
     checks: tuple[Check, ...] = ()
     note: str = ""
     tags: tuple[str, ...] = field(default_factory=tuple)
+    # Questions asked first, in order, in the same conversation. Only the
+    # answer to `question` is scored.
+    before: tuple[str, ...] = ()
 
 
 # --- checks -----------------------------------------------------------------
@@ -63,6 +66,22 @@ def routed(metric: str, grouping: str = "overall", period: str = CURRENT, **fiel
         ]
 
     return check
+
+
+def follows_up(observed: Observed, data: Data) -> list[str]:
+    intent = observed.answer.intent
+    if intent is None or not intent.follows_up:
+        return ["not read as a follow-up"]
+    if not observed.answer.restated.startswith("Following on from"):
+        return [f"restatement doesn't say it follows on: {observed.answer.restated!r}"]
+    return []
+
+
+def refined(observed: Observed, data: Data) -> list[str]:
+    change = getattr(observed.answer, "change_from_previous", "")
+    if not change.startswith("Changed from your last query"):
+        return [f"no change from the last query was shown: {change!r}"]
+    return []
 
 
 def no_generation(observed: Observed, data: Data) -> list[str]:
@@ -259,4 +278,30 @@ CASES: tuple[Case, ...] = (
          note="risk exists but not by segment; answering it exploratorily would improvise a definition"),
     Case("ambiguous-lisa", "how is Lisa doing this quarter", "refused",
          note="Lisa Park is a rep and Lisa Huang is a manager"),
+
+    # Follow-ups: the earlier questions are asked first, in one conversation.
+    Case("follow-segment", "what about SMB?", "metric",
+         (routed("attainment", "segment", segment="SMB"), follows_up),
+         before=("how is the Enterprise segment doing this quarter",), tags=("memory",)),
+    Case("follow-period", "and in Q1?", "metric",
+         (routed("attainment", period="Q1-2026"), follows_up),
+         before=("how are we tracking this quarter",), tags=("memory",)),
+    Case("follow-rep", "what about Sarah Chen?", "metric",
+         (routed("risk", "rep", rep="Sarah Chen"), follows_up),
+         before=("is Marcus Rivera at risk of missing quota this quarter",), tags=("memory",)),
+    Case("follow-refine-losses", "just for Enterprise", "exploratory",
+         (grouped("loss_reason", lambda f: _lost(f[f["segment"] == "Enterprise"]).groupby("loss_reason", dropna=False).size()), refined),
+         before=("why are we losing deals",), tags=("memory",)),
+    Case("follow-refine-accounts", "only Mid-Market", "exploratory",
+         (top_value("sum_deal_value", lambda f: _open(f[f["segment"] == "Mid-Market"]).groupby("account_name")["deal_value"].sum().max()), refined),
+         before=("which accounts have the most open pipeline",), tags=("memory",)),
+    Case("follow-region", "what about the West?", "refused", (no_generation,),
+         before=("how are we tracking this quarter",), tags=("memory", "refused-topic")),
+    Case("standalone-after-context", "why are we losing deals", "exploratory",
+         (grouped("loss_reason", lambda f: _lost(f).groupby("loss_reason", dropna=False).size()),),
+         before=("how is the Enterprise segment doing this quarter",), tags=("memory",),
+         note="a new standalone question must not inherit the Enterprise scope"),
+    Case("follow-cross-lane", "ok, and how are we tracking against quota overall?", "metric",
+         (routed("attainment"),),
+         before=("why are we losing deals",), tags=("memory",)),
 )

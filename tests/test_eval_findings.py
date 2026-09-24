@@ -36,13 +36,28 @@ def test_the_intent_schema_says_a_breakdown_across_everyone_is_overall():
     assert "overall" in description
 
 
-def test_the_router_is_told_to_name_a_metric_even_at_a_grouping_it_lacks(data):
+def test_the_router_is_told_to_mark_a_metric_limit(data):
     """Eval case unsupported-grouping: "the risk picture by segment" was
     marked unsupported, fell through to the exploratory lane, and came back
-    as open pipeline by segment and stage, narrated as a risk concentration.
-    Naming the metric lets validation refuse with the precise reason."""
+    as open pipeline by segment, narrated as a risk concentration. Asking the
+    router to name the metric anyway held for one run of the evals and then
+    didn't, because the model kept stating the limit in its reason. So the
+    limit gets its own kind, which the model uses on its own."""
     prompt = router._system_prompt(build_catalog(data))
-    assert "at a grouping it doesn't answer at" in prompt
+    assert "metric_limit" in prompt
+
+
+def test_a_metric_limit_refuses_without_generation(data):
+    client = FallbackStubClient(
+        router_input=_unsupported_input("risk answers overall or by rep, not by segment")
+        | {"unsupported_kind": "metric_limit"},
+        plan_input={"frame": "deals_q2", "aggregate": {"function": "count"}},
+    )
+    answer = ask("what's the risk picture by segment", data, client)
+
+    assert isinstance(answer, Refused)
+    assert "not by segment" in answer.reason
+    assert fallback.TOOL_NAME not in [c["tools"][0]["name"] for c in client.calls if c.get("tools")]
 
 
 def test_a_metric_at_an_unsupported_grouping_refuses_without_generation(data):

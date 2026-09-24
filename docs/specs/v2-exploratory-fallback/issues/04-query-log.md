@@ -3,7 +3,7 @@
 **Parent:** [V2 exploratory fallback lane](../../v2-exploratory-fallback.md)
 
 **What to build:** An append-only record of every fallback attempt, carrying
-the question, the generated expression, whether validation passed, whether
+the question, the generated query plan, whether validation passed, whether
 execution succeeded, and the row count.
 
 This ships in V2 rather than with V3 because V3 promotes a query that keeps
@@ -23,10 +23,10 @@ Append-only and local. No question text leaves the machine.
 **Status:** ready-for-agent
 
 - [ ] Every fallback attempt appends exactly one record
-- [ ] A record carries the question, the expression, validation outcome,
+- [ ] A record carries the question, the plan, validation outcome,
       execution outcome, and row count
-- [ ] A generator decline is logged with its reason and no expression
-- [ ] A validation rejection is logged with the expression that was rejected
+- [ ] A generator decline is logged with its reason and no plan
+- [ ] A validation rejection is logged with the plan that was rejected and the reason
 - [ ] Metric-lane answers append nothing
 - [ ] The log is append-only and never rewritten in place
 - [ ] The log survives a restart

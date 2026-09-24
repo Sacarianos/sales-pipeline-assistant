@@ -285,6 +285,10 @@ class RefusedTopic:
     word_pattern: str
     values: Callable[[Catalog], tuple[str, ...]]
     reason: Callable[[Catalog], str]
+    # The frame columns the topic rests on. The fallback lane hides them from
+    # every plan, so a question that never says the topic's name still can't
+    # reach the data behind it.
+    columns: tuple[str, ...] = ()
 
 
 REFUSED_TOPICS: tuple[RefusedTopic, ...] = (
@@ -293,6 +297,7 @@ REFUSED_TOPICS: tuple[RefusedTopic, ...] = (
         word_pattern=r"\bregions?\b",
         values=lambda catalog: catalog.regions,
         reason=lambda catalog: catalog.region_refusal_reason(),
+        columns=("region", "rep_region"),
     ),
 )
 

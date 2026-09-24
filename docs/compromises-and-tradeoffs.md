@@ -222,7 +222,7 @@ answer to the brief's third deliverable ("where does it still fall short").
 
 For completeness, two things worth distinguishing from the list above so
 they don't get conflated with it in the report: a second branch
-(`v2-exploratory-fallback`) exists with an AST-sandboxed pandas fallback lane
+(`v2-exploratory-fallback`) exists with a structured-query-plan fallback lane
 for questions outside the registered metrics. It originally predated the
 product-line reversal in section 5 and refused product line on the original
 attribution reasoning. Main has since been merged into it and that refusal

@@ -629,12 +629,13 @@ metric, with the generated query shown expanded, and they never receive the
 same verified badge.
 
 That lane was planned here as text-to-SQL over DuckDB with `sqlglot` validating
-a read-only single select. It generates pandas instead, validated as an AST
-against an allowlist, because the rules this system trusts (period membership,
+a read-only single select. It runs pandas over the loader's frames instead,
+first as a generated expression checked as an AST and now as a structured
+query plan per ADR-0007, because the rules this system trusts (period membership,
 open as the complement of the closed stages, the joined rep attributes) live in
 the loader's frames rather than in the CSVs, and a lane that rebuilt them in
 SQL could disagree with the metric lane about what "open" means. Recorded in
-ADR-0006.
+ADR-0006 and ADR-0007.
 
 A promote-to-metric path, so that a logged fallback query which keeps recurring
 can be turned into a registered metric, moves to V3. The query log that feeds

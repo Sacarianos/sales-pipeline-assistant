@@ -23,9 +23,9 @@ class Unit(str, Enum):
     PERCENT = "percent"
     COUNT = "count"
     DATE = "date"
-    # A computed number with no pinned business meaning — the fallback lane's
-    # unit, since a generated expression's result isn't known ahead of time to
-    # be a dollar figure, a percentage, or a count the way a metric's is.
+    # A computed number with no pinned business meaning. The fallback lane
+    # uses it when a query's result isn't a dollar figure or a count, like
+    # the average of a column that isn't money.
     NUMBER = "number"
 
 
@@ -123,9 +123,13 @@ class Answered:
     # Answered type, so every consumer that already handles an answer keeps
     # working and the interface decides what to draw from this alone.
     lane: Literal["metric", "exploratory"] = "metric"
-    # The generated pandas expression, set only when `lane` is "exploratory".
-    # It's the one thing a reader can't otherwise check about this answer, so
-    # it travels with the answer itself rather than living only in the log.
+    # Set only when `lane` is "exploratory". The query a model chose is the
+    # one thing a reader can't otherwise check about this answer, so it
+    # travels with the answer in two forms, both built from the query plan
+    # and never from model prose. `query_description` is plain English for
+    # the reader. `expression` is the equivalent pandas an analyst can paste
+    # into a notebook to reproduce the figure.
+    query_description: str = ""
     expression: str = ""
     # The one sentence restating how the question was read, rendered inside
     # the answer itself. For the metric lane this is `intent.restated`; the

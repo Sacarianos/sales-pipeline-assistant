@@ -31,15 +31,20 @@ def ask(question: str, data: Data, client: object | None = None) -> Answer:
     # not. Only an intent the router itself couldn't match, and that isn't
     # a topic refused ahead of routing (region), reaches the fallback lane
     # at all.
+    declined = None
     if intent.is_unsupported() and not routing.refused_topic:
-        exploratory = fallback.attempt(question, data, client)
-        if exploratory is not None:
+        exploratory = fallback.attempt(question, data, client, router_mode=routing.mode)
+        if isinstance(exploratory, Answered):
             return exploratory
+        declined = exploratory
 
     error = validate(intent, catalog, data)
     if error is not None:
+        reason = error.reason
+        if isinstance(declined, fallback.Declined):
+            reason = f"{reason.rstrip('.')}. An exploratory query was tried too, and {declined.reason.rstrip('.')}."
         return Refused(
-            reason=error.reason,
+            reason=reason,
             hint=catalog.coverage_hint(),
             intent=intent,
             router_mode=routing.mode,

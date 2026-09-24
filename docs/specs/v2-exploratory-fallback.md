@@ -44,10 +44,12 @@ hallucinating tool produced by a different route.
 ## Solution
 
 A second lane behind the same question box. When no registered metric covers
-a question, the system generates a single pandas expression against the frames
-the metrics already use, validates that expression as an AST against an
-allowlist before running it, executes it with builtins stripped, and presents
-the result as exploratory rather than as a defined metric.
+a question, a model fills a structured query plan against the frames the
+metrics already use: one frame, filters, grouping, one aggregate, sort, and
+limit. Code written by hand checks the plan against the frame schemas, runs
+it, and presents the result as exploratory rather than as a defined metric.
+Nothing the model writes is ever evaluated. ADR-0007 records why this replaced
+the generated pandas expression an earlier draft of this spec used.
 
 Every number still comes from pandas. That part does not change and is not
 negotiable.
@@ -56,7 +58,7 @@ What changes is what is being trusted. In the metric lane, both the
 computation and the interpretation are pinned: a registered metric decides
 what "attainment" counts, and a human wrote that down. In the fallback lane
 the computation is still deterministic, but the interpretation is
-model-generated, so the answer carries the expression in full and a warning
+model-generated, so the answer carries the query in full and a warning
 stated in the strongest terms the interface has. A reader should never have to
 guess which lane answered them, and the one that carries more risk is the one
 that says so loudest.
@@ -72,9 +74,9 @@ data rather than quoted from a written string.
 2. As a sales leader, I want an unmissable warning when an answer came from a
    generated query rather than a defined metric, so that I know to check it
    before I repeat it to anyone.
-3. As a sales leader, I want the expression behind an exploratory answer shown
-   without opening anything, so that the thing I can't otherwise check is the
-   thing most in front of me.
+3. As a sales leader, I want the query behind an exploratory answer shown in
+   plain English without opening anything, so that the thing I can't
+   otherwise check is the thing most in front of me.
 4. As a sales leader, I want exploratory answers to carry no verified badge,
    so that the badge keeps meaning exactly one thing.
 5. As a sales leader, I want region to keep refusing even though the fallback
@@ -88,16 +90,16 @@ data rather than quoted from a written string.
    confident answer about data nobody has.
 8. As a sales leader, I want the row count and the frame an exploratory answer
    read from, so that I can tell a Q1 answer from a Q2 one.
-9. As an analyst, I want the generated expression to be reproducible by hand,
+9. As an analyst, I want the query shown as pandas I can run by hand,
    so that I can paste it into a notebook and get the same number.
-10. As an engineer, I want a generated expression validated before it runs, so
+10. As an engineer, I want a generated plan validated before it runs, so
     that the safety of the lane doesn't depend on the model behaving.
-11. As an engineer, I want a rejected expression to refuse rather than be
+11. As an engineer, I want a rejected plan to refuse rather than be
     repaired, so that the failure mode stays a visible no.
 12. As an engineer, I want the fallback to read the same frames the metrics
     read, so that the two lanes can never disagree about what "open" means.
 13. As an engineer, I want every fallback attempt logged with its question,
-    expression, and outcome, so that V3 has something to promote from.
+    plan, and outcome, so that V3 has something to promote from.
 14. As an engineer, I want the registry consulted first, so that a question a
     metric covers is never answered by generated code.
 
@@ -112,12 +114,18 @@ Four steps, in order, and the first that applies wins:
 2. The router runs against the catalog. A registered metric that validates
    answers in the metric lane, unchanged from V1.
 3. Otherwise the fallback lane attempts the question.
-4. If the fallback declines or its expression fails validation, the system
-   refuses with the catalog coverage hint, as V1 does now.
+4. If the fallback declines or its plan fails validation, the system
+   refuses with the catalog coverage hint, as V1 does now, and says why the
+   exploratory lane couldn't answer.
+
+Only a question the router can't match reaches step 3. A question it matches
+to a metric that doesn't support the requested grouping, like risk by segment,
+refuses at step 2 and never reaches the fallback. Answering it there would put
+an improvised definition next to a defined one under the same metric name.
 
 The registry is consulted first and always wins. A question a metric covers
 must never be answered by generated code, because the metric encodes a
-business definition a human agreed to and the generated expression does not.
+business definition a human agreed to and the generated plan does not.
 
 Refused topics are checked ahead of everything for the reason region is today:
 the one wrong move available to a model asked about a refused topic is
@@ -146,55 +154,58 @@ through the fallback lane, since accounts carry no equivalent ambiguity.
 
 ### What the generator sees
 
-Column names, dtypes, and the distinct values of low-cardinality columns, in
-the same shape the router prompt already uses. It never receives a data row.
-The generator is structurally incapable of leaking a figure into its output
-because it was never shown one, which is the same guarantee the router rests
-on and for the same reason.
+Column names, column kinds, and the distinct values of low-cardinality
+columns, in the same shape the router prompt already uses. It never receives
+a data row. The generator is structurally incapable of leaking a figure into
+its output because it was never shown one, which is the same guarantee the
+router rests on and for the same reason.
 
-It also receives the frames it may name and nothing about how they were built,
-since the expression it writes is validated against the allowlist rather than
-against its own understanding.
+It never sees a withheld column either. The columns a refused topic rests on,
+region on the deal and region on the rep, are left out of the prompt, the
+tool schema, and every row listing, and a plan naming one is rejected as
+withheld. Refusing the word "region" ahead of routing isn't enough on its own,
+since "which territory has the most pipeline" never says it.
 
 If a question needs a column that does not exist, the generator returns a
-decline with a reason instead of an expression. Declining is cheap. An
-expression over a column nobody has is a refusal one step later anyway, and a
-plausible-looking substitution is worse than either.
+decline with a reason instead of a plan. Declining is cheap. A plan over a
+column nobody has is a refusal one step later anyway, and a plausible-looking
+substitution is worse than either. The decline reason reaches the reader on
+the refusal.
 
-### The sandbox
+### The query plan
 
-Recorded in ADR-0006. A single pandas expression, parsed with
-`ast.parse(mode="eval")`, walked node by node against an allowlist, then
-executed with `__builtins__` emptied and only the allowlisted frames bound.
+Recorded in ADR-0007. The generator fills a plan through a forced tool whose
+schema enumerates the frames and columns:
 
-Allowed: references to the named frames, subscripting, comparisons, boolean
-and arithmetic operators, constants, lists and tuples, attribute access to
-allowlisted method names, and calls to those methods only.
+- `frame`: exactly one of the frames below.
+- `filters`: column, operator, and value, combined with AND. Ordered
+  comparisons only on number and date columns. A category filter must name a
+  value the column holds, so a typo refuses instead of matching nothing.
+- `group_by`: up to two columns, never a number column.
+- `aggregate`: count, distinct count, sum, mean, median, min, or max. Leaving
+  it out lists rows instead, with the columns the plan names.
+- `sort_by`, `descending`, and `limit`, capped at the row cap.
 
-Rejected: imports, lambdas, comprehensions, assignments, walrus, `await`,
-`yield`, f-strings with embedded calls, any attribute whose name begins with
-an underscore, and any call to a name or method not on the list. The
-underscore rule is what closes `__class__`, `__globals__`, and the rest of
-that family in one line rather than by enumerating them.
+`acme/query_plan.py` checks every field against the schema of the frame
+the plan names, then runs the plan with pandas written by hand. A rejected
+plan refuses. It is never repaired, never partially run, and never retried
+with the offending part removed, because a repaired query answers a question
+nobody asked.
 
-The allowlist of methods is deliberately small and lives in one place. A
-method nobody put on the list is a refusal, not a bug report.
+Every result carries two readings of the plan, both built from the plan
+itself and never from model prose. One is a plain English sentence for the
+reader. The other is the equivalent pandas for an analyst, and tests pin that
+code to the result that actually ran.
 
-Validation always runs before execution. A rejected expression refuses. It is
-never repaired, never partially executed, and never retried with the offending
-clause stripped, because a repaired query answers a question nobody asked.
-
-Execution is additionally bounded: the result must be a DataFrame, a Series, or
-a scalar, and a result larger than a row cap is truncated for display with the
-full count reported.
+A result larger than a row cap is truncated for display with the full count
+reported.
 
 ### Frames the lane may name
 
 `deals_q1`, `deals_q2`, `quotas`, and `reps`, bound to the same objects the
-metrics use. Named per snapshot rather than as one frame, because a fallback
-that silently blends the two snapshots would reintroduce the exact error the
-reconciler exists to prevent. There is no combined frame and no way to ask for
-one.
+metrics use. A plan names exactly one, so there is no way to blend the two
+snapshots, which would reintroduce the exact error the reconciler exists to
+prevent.
 
 ### Facts, narration, and the badge
 
@@ -203,7 +214,7 @@ still sees only computed values and the verifier still checks every numeric
 token in the prose against them. The no-hallucinated-number guarantee is
 unchanged in this lane.
 
-What is not guaranteed is that the expression answered the question that was
+What is not guaranteed is that the plan answered the question that was
 asked. That is why the badge differs. A verified metric answer says how many
 figures were checked. An exploratory answer says the figures were computed and
 checked but the query was model-written, and it shows the query.
@@ -220,7 +231,8 @@ below it, and impossible to read past. It says the answer did not come from a
 defined metric in the catalog, that the query was written by a model, and that
 the figure should be checked before being repeated.
 
-Under the warning: the generated expression shown expanded and never behind a
+Under the warning: the query in plain English, then its pandas, both shown
+expanded and never behind a
 click, the result table, the row count, and the frame that was read.
 
 The warning is the one place in this app where alarm is the correct register.
@@ -236,7 +248,7 @@ those caveats are properties of the data rather than of the lane.
 ### Query log
 
 Every fallback attempt appends a record: the question, the generated
-expression, whether validation passed, whether execution succeeded, and the
+plan, whether validation passed, whether execution succeeded, and the
 row count. This is what V3's promote-to-metric path reads, and it is the
 cheapest possible thing that makes V3 possible, so it ships now rather than
 being retrofitted onto a lane that has already been answering questions.
@@ -246,8 +258,8 @@ The log is append-only and local. No question text leaves the machine.
 ### Models
 
 The generator uses the router's model, `claude-sonnet-5`, from the same
-configuration constant. Writing a correct pandas expression against a schema
-is closer in kind to routing than to narrating, and a wrong expression is a
+configuration constant. Filling a query plan against a schema is closer in
+kind to routing than to narrating, and a wrong plan is a
 wrong answer, so it gets the stronger model.
 
 ## Testing Decisions
@@ -255,13 +267,14 @@ wrong answer, so it gets the stronger model.
 The primary seam stays `ask(question, data, client)`. Fallback answers are
 asserted through it the same way metric answers are.
 
-The validator is a deliberate second seam, tested directly, for the same
-reason the reconciler's change log was in V1: it is the highest-risk code in
-the system and getting it wrong reproduces a failure worse than the one the
-project exists to prevent. Its tests are adversarial rather than illustrative
-and include at minimum dunder traversal, import attempts, lambda and
-comprehension bodies, calls to non-allowlisted methods, references to
-unbound names, and attempts to reach a builtin.
+The query plan checker is a deliberate second seam, tested directly, for the
+same reason the reconciler's change log was in V1: it is the highest-risk code
+in the lane and getting it wrong reproduces a failure worse than the one the
+project exists to prevent. Its tests try to get a bad plan past it: unknown
+frames and columns, withheld columns, aggregates over the wrong column kind,
+ordered comparisons on text, category values the column doesn't hold,
+malformed dates, and code smuggled into a filter value. A second set pins the
+displayed pandas to the result that actually ran.
 
 Covered through the primary seam:
 
@@ -271,10 +284,14 @@ Covered through the primary seam:
 - Region refuses and no generation is attempted.
 - A question needing a column nobody has refuses rather than answering.
 - An exploratory answer carries no verified-metric badge and does carry its
-  expression.
+  query, in plain English and as pandas.
+- A payload in the old expression shape, including the two that escaped the
+  V2 sandbox, refuses and runs nothing.
+- A plan over either region column refuses as withheld.
+- A decline or a rejected plan says why on the refusal.
 - Prose in the fallback lane is still verified against facts, asserted by
   stubbing prose containing an unlisted figure and seeing it blocked.
-- The two snapshots are never blended, asserted by the frames the lane exposes.
+- The two snapshots are never blended, since a plan names exactly one frame.
 - Every fallback attempt appends exactly one log record, including refusals.
 
 ## Out of Scope
@@ -282,7 +299,7 @@ Covered through the primary seam:
 Promote-to-metric, which is V3 and is what the query log exists to feed.
 
 Writes of any kind. Joins the metric lane doesn't already make available.
-Multi-turn refinement of a generated expression. Charts over exploratory
+Multi-turn refinement of a generated plan. Charts over exploratory
 results, since a chart implies a settled shape and these do not have one.
 
 Region, permanently, on the grounds in Refused topics above. It remains a
@@ -295,15 +312,15 @@ answer something it shouldn't.
 ### Planned for V3
 
 A promote-to-metric path: a fallback query that keeps recurring in the log gets
-turned into a registered metric, with the generated expression as the starting
+turned into a registered metric, with the recorded plan as the starting
 point for the metric body and a human writing the definition text before it
 ships. The point of V3 is that the human writes the definition, so the
 promotion is a decision rather than a copy.
 
 ### Stack
 
-No new dependencies. `ast` is standard library and the frames already exist.
-`duckdb` and `sqlglot` are not adopted, per ADR-0006.
+No new dependencies. The plan is a pydantic model and the frames already
+exist. `duckdb` and `sqlglot` are not adopted, per ADR-0006.
 
 The vocabulary used throughout this spec is defined in `CONTEXT.md` at the
 repo root.

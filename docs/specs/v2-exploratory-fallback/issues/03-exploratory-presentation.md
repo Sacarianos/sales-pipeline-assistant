@@ -2,6 +2,11 @@
 
 **Parent:** [V2 exploratory fallback lane](../../v2-exploratory-fallback.md)
 
+**Reworked under ADR-0007.** The query now shows twice under the warning: a
+plain English sentence built from the plan, then the equivalent pandas, which
+wraps instead of scrolling sideways. The notes below describe the
+presentation as first built, when only the expression was shown.
+
 **What to build:** An exploratory answer nobody could mistake for a defined
 metric, led by a warning nobody could read past.
 

@@ -2,6 +2,12 @@
 
 **Parent:** [V2 exploratory fallback lane](../../v2-exploratory-fallback.md)
 
+**Superseded by ADR-0007.** The sandbox below shipped and was then removed.
+`agg` dispatched a string argument to any frame method, so a generated
+expression could write a file, and `9 ** 9 ** 9` hung the process. The lane
+now runs a structured query plan through `acme/query_plan.py`, and no
+model-written code executes. This issue stays as the record of what was built.
+
 **What to build:** The safety boundary the whole lane rests on. A function that
 takes a pandas expression as a string and either returns a validated, executed
 result or refuses, with nothing in between.

@@ -4,16 +4,18 @@ short-circuits ahead of it.
 Per the parent spec's testing decisions, most of this goes in through the
 primary seam - `ask(question, data, client)` - and asserts on what reaches
 the screen. `_frames` and the generator's schema prompt are checked directly
-in a couple of places, the same way the parent spec treats the sandbox
-validator as a deliberate second seam: the frame boundary and the
-no-data-row guarantee are exactly the properties this lane exists to hold,
-so they're worth pinning against directly rather than only inferring them.
+in a few places, the same way the parent spec treats the query plan checker
+as a deliberate second seam. The frame boundary, the hidden region columns,
+and the no-data-row guarantee are what this lane exists to hold, so they're
+pinned directly and not only inferred.
 """
 
 from __future__ import annotations
 
+import pytest
+
 from acme import config, fallback
-from acme.domain import Answered, Refused
+from acme.domain import Answered, Refused, Unit
 from acme.pipeline import ask
 from tests.test_llm_router_and_refusals import StubRouterClient
 
@@ -64,7 +66,7 @@ class FallbackStubClient:
         tool_name = tools[0]["name"]
         if tool_name == "route_question":
             return _Message([_ToolUseBlock(self.router_input)])
-        if tool_name == "generate_pandas_expression":
+        if tool_name == fallback.TOOL_NAME:
             if self.plan_input is None:
                 raise RuntimeError("no plan configured for this stub")
             return _Message([_ToolUseBlock(self.plan_input)])
@@ -89,22 +91,24 @@ def test_an_exploratory_answer_still_carries_a_restatement(data):
     backstop against a silent misroute every other answer carries."""
     client = FallbackStubClient(
         router_input=_unsupported_input(),
-        plan_input={"expression": "deals_q2['deal_value'].sum()"},
+        plan_input={"frame": "deals_q2", "aggregate": {"function": "sum", "column": "deal_value"}},
     )
     answer = ask("why are we losing deals", data, client)
 
     assert isinstance(answer, Answered)
     assert answer.restated
-    assert "deals_q2" in answer.restated
+    assert "Q2 snapshot" in answer.restated
 
 
 def test_a_loss_reason_question_answers_in_the_fallback_lane_with_a_table(data):
     client = FallbackStubClient(
         router_input=_unsupported_input(),
         plan_input={
-            "expression": (
-                "deals_q2[deals_q2['stage'] == 'Closed Lost']['loss_reason'].value_counts()"
-            )
+            "frame": "deals_q2",
+            "filters": [{"column": "stage", "op": "eq", "value": "Closed Lost"}],
+            "group_by": ["loss_reason"],
+            "aggregate": {"function": "count"},
+            "sort_by": "result",
         },
     )
     answer = ask("why are we losing deals", data, client)
@@ -118,9 +122,11 @@ def test_an_account_level_question_answers_in_the_fallback_lane(data):
     client = FallbackStubClient(
         router_input=_unsupported_input(),
         plan_input={
-            "expression": (
-                "deals_q2.groupby('account_name')['deal_value'].sum().nlargest(5)"
-            )
+            "frame": "deals_q2",
+            "group_by": ["account_name"],
+            "aggregate": {"function": "sum", "column": "deal_value"},
+            "sort_by": "result",
+            "limit": 5,
         },
     )
     answer = ask("which accounts have the most pipeline", data, client)
@@ -150,7 +156,10 @@ def test_a_metric_question_answers_in_the_metric_lane_not_the_fallback(data):
 
 
 def test_region_refuses_and_no_generation_is_attempted(data):
-    client = FallbackStubClient(router_input=_unsupported_input(), plan_input={"expression": "1"})
+    client = FallbackStubClient(
+        router_input=_unsupported_input(),
+        plan_input={"frame": "deals_q2", "aggregate": {"function": "sum", "column": "deal_value"}},
+    )
     answer = ask("how is the West region doing this quarter", data, client)
 
     assert isinstance(answer, Refused)
@@ -191,7 +200,7 @@ def test_a_question_needing_a_column_nobody_has_refuses_rather_than_answering(da
 def test_the_generator_prompt_contains_no_data_row(data):
     client = FallbackStubClient(
         router_input=_unsupported_input(),
-        plan_input={"expression": "deals_q2['deal_value'].sum()"},
+        plan_input={"frame": "deals_q2", "aggregate": {"function": "sum", "column": "deal_value"}},
     )
     ask("why are we losing deals", data, client)
 
@@ -219,41 +228,181 @@ def test_the_lane_exposes_per_snapshot_frames_and_no_combined_frame(data):
     assert frames["deals_q2"] is data.deals("Q2")
 
 
-def test_an_expression_combining_both_snapshots_refuses_rather_than_answering(data):
-    """The sandbox enforces this, not the generator's compliance with a
-    prompt instruction: even a plan that tries to blend deals_q1 and
-    deals_q2 (arithmetic between two aggregates, here) is rejected before
-    it ever runs."""
+def test_a_plan_naming_both_snapshots_refuses_rather_than_answering(data):
+    """A plan names one frame, so there is no plan that reads both
+    snapshots. A frame value that tries to name both is just a frame nobody
+    has, rejected before anything runs."""
     client = FallbackStubClient(
         router_input=_unsupported_input(),
         plan_input={
-            "expression": (
-                "deals_q1['deal_value'].sum() + deals_q2['deal_value'].sum()"
-            )
+            "frame": "deals_q1 + deals_q2",
+            "aggregate": {"function": "sum", "column": "deal_value"},
         },
     )
     answer = ask("what's our combined pipeline across both quarters", data, client)
 
     assert isinstance(answer, Refused)
+    assert "not one of the frames" in answer.reason
 
 
-def test_a_generated_expression_failing_validation_refuses_with_the_catalog_hint(data):
+def test_a_rejected_plan_refuses_with_its_reason_and_the_catalog_hint(data):
     client = FallbackStubClient(
         router_input=_unsupported_input(),
-        plan_input={"expression": "deals_q2.to_csv('pwned.csv')"},
+        plan_input={
+            "frame": "deals_q2",
+            "filters": [{"column": "stage", "op": "eq", "value": "Closed-Lost"}],
+            "aggregate": {"function": "count"},
+        },
     )
-    answer = ask("why are we losing deals", data, client)
+    answer = ask("how many deals did we lose", data, client)
 
     assert isinstance(answer, Refused)
+    assert "'Closed-Lost' is not a value of 'stage'" in answer.reason
     from acme.catalog import build_catalog
 
     assert answer.hint == build_catalog(data).coverage_hint()
 
 
+def test_a_decline_tells_the_reader_why(data):
+    """User story 7: a question needing a column nobody has says so, rather
+    than falling back to the generic coverage refusal alone."""
+    client = FallbackStubClient(
+        router_input=_unsupported_input(),
+        plan_input={"decline_reason": "no column in these frames covers Slack sentiment"},
+    )
+    answer = ask("what did our Slack sentiment look like", data, client)
+
+    assert isinstance(answer, Refused)
+    assert "no column in these frames covers Slack sentiment" in answer.reason
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "deals_q2.agg('to_csv', path_or_buf='{path}')",
+        "deals_q2.to_csv('{path}')",
+        "9 ** 9 ** 9",
+    ],
+)
+def test_generated_code_is_never_run(data, tmp_path, payload):
+    """Regression for the V2 sandbox: `agg` dispatched a string argument to
+    any frame method, so this first payload wrote a file while the reader
+    saw a refusal, and the last one hung the process. A plan has no field
+    that takes code, so a payload in the old shape is a plan with no frame."""
+    target = tmp_path / "pwned.csv"
+    client = FallbackStubClient(
+        router_input=_unsupported_input(),
+        plan_input={"expression": payload.format(path=target.as_posix())},
+    )
+    answer = ask("why are we losing deals", data, client)
+
+    assert isinstance(answer, Refused)
+    assert not target.exists()
+
+
+def test_a_plan_over_either_region_column_refuses(data):
+    """Region refuses ahead of both lanes when the question says "region".
+    A question that avoids the word, like "which territory", used to reach
+    the fallback, which grouped by the deal-side region column and picked a
+    definition silently. The region columns are hidden from the plan now,
+    so that plan is rejected before it runs, and the refusal says the
+    column is withheld rather than pretending it doesn't exist."""
+    for column in ("region", "rep_region"):
+        client = FallbackStubClient(
+            router_input=_unsupported_input(),
+            plan_input={
+                "frame": "deals_q2",
+                "group_by": [column],
+                "aggregate": {"function": "sum", "column": "deal_value"},
+            },
+        )
+        answer = ask("which territory has the most pipeline", data, client)
+
+        assert isinstance(answer, Refused)
+        assert f"'{column}' is withheld" in answer.reason
+
+
+def test_the_generator_is_never_shown_a_region_column(data):
+    prompt = fallback._system_prompt(data)
+    schema = fallback._tool_schema(data)
+    assert "region" not in prompt
+    assert "region" not in str(schema)
+
+
+def test_an_exploratory_answer_says_in_plain_english_what_it_computed(data):
+    client = FallbackStubClient(
+        router_input=_unsupported_input(),
+        plan_input={
+            "frame": "deals_q2",
+            "filters": [{"column": "stage", "op": "eq", "value": "Closed Lost"}],
+            "group_by": ["loss_reason"],
+            "aggregate": {"function": "count"},
+            "sort_by": "result",
+        },
+    )
+    answer = ask("why are we losing deals", data, client)
+
+    assert isinstance(answer, Answered)
+    assert answer.query_description == (
+        "Number of deals in the Q2 snapshot where stage is Closed Lost, "
+        "grouped by loss reason, sorted by the result, highest first."
+    )
+    assert answer.query_description in answer.restated
+
+
+def test_a_group_with_no_value_is_labelled_blank_not_by_row_number(data):
+    """A closed-lost deal with no loss reason groups under a missing key. Its
+    fact still needs a label a reader can place, not "row 7"."""
+    client = FallbackStubClient(
+        router_input=_unsupported_input(),
+        plan_input={
+            "frame": "deals_q2",
+            "filters": [{"column": "stage", "op": "eq", "value": "Closed Lost"}],
+            "group_by": ["loss_reason"],
+            "aggregate": {"function": "count"},
+        },
+    )
+    answer = ask("why are we losing deals", data, client)
+
+    assert isinstance(answer, Answered)
+    labels = [fact.label for fact in answer.facts.values()]
+    assert "blank: count" in labels
+    assert not any(label.startswith("row ") for label in labels)
+
+
+def test_a_listed_deal_is_labelled_by_its_first_two_text_columns(data):
+    client = FallbackStubClient(
+        router_input=_unsupported_input(),
+        plan_input={
+            "frame": "deals_q2",
+            "columns": ["deal_id", "account_name", "stage", "deal_value"],
+            "sort_by": "deal_value",
+            "limit": 1,
+        },
+    )
+    answer = ask("what's our biggest deal", data, client)
+
+    assert isinstance(answer, Answered)
+    top = data.deals("Q2").sort_values("deal_value", ascending=False).iloc[0]
+    assert answer.facts["row0_deal_value"].label == f"{top['deal_id']} / {top['account_name']}: deal_value"
+
+
+def test_a_total_of_deal_value_is_a_currency_fact(data):
+    client = FallbackStubClient(
+        router_input=_unsupported_input(),
+        plan_input={"frame": "deals_q2", "aggregate": {"function": "sum", "column": "deal_value"}},
+    )
+    answer = ask("what's our total pipeline", data, client)
+
+    assert isinstance(answer, Answered)
+    assert answer.facts["result"].unit is Unit.CURRENCY
+    assert answer.facts["matched_rows"].value == len(data.deals("Q2"))
+
+
 def test_prose_citing_a_figure_absent_from_facts_is_blocked(data):
     client = FallbackStubClient(
         router_input=_unsupported_input(),
-        plan_input={"expression": "deals_q2['deal_value'].sum()"},
+        plan_input={"frame": "deals_q2", "aggregate": {"function": "sum", "column": "deal_value"}},
         narrator_text="The total pipeline value is 999999999, a huge number.",
     )
     answer = ask("what's our total pipeline", data, client)
@@ -268,7 +417,7 @@ def test_prose_citing_only_verified_figures_publishes(data):
     total = float(data.deals("Q2")["deal_value"].sum())
     client = FallbackStubClient(
         router_input=_unsupported_input(),
-        plan_input={"expression": "deals_q2['deal_value'].sum()"},
+        plan_input={"frame": "deals_q2", "aggregate": {"function": "sum", "column": "deal_value"}},
         narrator_text=f"The total pipeline value across all deals is {total:,.0f}.",
     )
     answer = ask("what's our total pipeline", data, client)
@@ -281,7 +430,7 @@ def test_prose_citing_only_verified_figures_publishes(data):
 def test_the_generator_uses_the_router_model_configuration_constant(data):
     client = FallbackStubClient(
         router_input=_unsupported_input(),
-        plan_input={"expression": "deals_q2['deal_value'].sum()"},
+        plan_input={"frame": "deals_q2", "aggregate": {"function": "sum", "column": "deal_value"}},
     )
     ask("why are we losing deals", data, client)
 

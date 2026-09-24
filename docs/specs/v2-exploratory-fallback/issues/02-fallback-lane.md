@@ -2,6 +2,13 @@
 
 **Parent:** [V2 exploratory fallback lane](../../v2-exploratory-fallback.md)
 
+**Reworked under ADR-0007.** The lane now asks for a structured query plan
+instead of a pandas expression, and the sandbox this issue ran expressions
+through is gone. Lane precedence, the frames, flags, narration, and the badge
+are unchanged. A decline or a rejected plan now says why on the refusal, and
+the region columns are withheld from every plan. The notes below describe the
+lane as first built.
+
 **What to build:** The lane itself. A question the registry doesn't cover
 reaches a generator, comes back as a pandas expression, runs through the
 sandbox, and returns an answer instead of a refusal.

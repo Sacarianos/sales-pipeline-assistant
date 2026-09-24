@@ -19,6 +19,7 @@ to prevent.
 from __future__ import annotations
 
 import html
+import re
 import time
 from typing import Iterator
 
@@ -40,27 +41,34 @@ TRANSCRIPT_HEIGHT = 520
 # The one place in this app where alarm is the correct register. Everywhere
 # else the interface keeps caveats legible without making them frightening,
 # because a leader alarmed by a partial-period notice stops reading notices
-# altogether - but the risk here is specific and real (a model wrote the
-# query, not a person), so the treatment matches it. What's unverified is
-# the interpretation, not the arithmetic: the numbers are computed and
-# checked exactly as a metric's are, so the warning says that rather than
-# implying the arithmetic itself is suspect.
+# altogether. The risk here is specific and real, since a model chose the
+# query, so the treatment matches it. The arithmetic is computed and checked
+# exactly as a metric's is. What nobody has checked is whether the query
+# asks what the reader meant, and the warning says exactly that.
 EXPLORATORY_WARNING = (
-    "This answer did not come from a defined metric in the catalog. A model "
-    "wrote the query below to answer your question, and that query has not "
-    "been checked. The figures it produced were computed by pandas and the "
-    "prose above was checked against them, the same way a metric's is - "
-    "what's unverified is whether the query answered the question you "
-    "asked. Check it before you repeat this figure to anyone."
+    "This answer didn't come from a defined metric in the catalog. A model "
+    "chose the query below to answer your question. The figures were "
+    "computed by pandas and the wording of the answer was checked against "
+    "them, the same as a metric's. Nobody has checked that the query asks "
+    "what you meant. Read it before you repeat this figure to anyone."
 )
 EXPLORATORY_BADGE = (
     "Figures computed and checked against the query above. The query itself "
-    "was written by a model."
+    "was chosen by a model."
 )
 NARRATION_BLOCKED_CAPTION = (
     "⚠ Model output blocked: a figure didn't verify. "
     "Showing the computed sentence instead."
 )
+
+# Filter values in a query description come from the model, so they're
+# escaped before they reach markdown and can't restyle the line.
+MARKDOWN_SPECIALS = re.compile(r"([\\`*_{}\[\]()#+\-.!|<>$~])")
+
+
+def _markdown_escape(text: str) -> str:
+    return MARKDOWN_SPECIALS.sub(r"\\\1", text)
+
 
 # Nothing here sets a background or a text colour of its own. The app runs in
 # whichever theme the reader has chosen, and painting a light panel into a
@@ -243,15 +251,15 @@ def _render_answer(answer: Answer, *, stream: bool) -> None:
         return
 
     if answer.lane == "exploratory":
-        # The warning comes first, above the answer rather than below it,
-        # in the strongest treatment the interface has - this is the one
-        # place alarm is the right register. The expression follows it
-        # immediately, expanded and never behind a click: it's the one
-        # thing about this answer a reader can't otherwise check, so it
-        # belongs in front of them rather than in the side panel.
+        # The warning comes first, above the answer, in the strongest
+        # treatment the interface has. The query follows it straight away
+        # and is never behind a click, since it's the one thing about this
+        # answer a reader can't otherwise check. It shows twice: in plain
+        # English for the reader, then as the pandas an analyst can rerun.
         st.markdown("<span class='exploratory-pill'>Exploratory</span>", unsafe_allow_html=True)
         st.error(EXPLORATORY_WARNING)
-        st.code(answer.expression, language="python")
+        st.markdown(f"**Query:** {_markdown_escape(answer.query_description)}")
+        st.code(answer.expression, language="python", wrap_lines=True)
 
     if stream:
         st.write_stream(_typewriter(answer.prose))

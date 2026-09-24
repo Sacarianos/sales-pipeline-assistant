@@ -1,5 +1,10 @@
 # The exploratory fallback generates pandas validated as an AST, not SQL validated by sqlglot
 
+Superseded in part by ADR-0007. The lane still reads the loader's frames
+instead of the CSVs, for the reasons below. The AST sandbox did not hold up:
+the generator now fills a structured query plan and no model-written code
+runs.
+
 V1's further notes planned a text-to-SQL lane over DuckDB, with `sqlglot`
 proving each generated statement was a single read-only select against
 whitelisted tables before it ran.

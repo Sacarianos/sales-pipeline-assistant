@@ -424,14 +424,15 @@ def _value_text(value: Scalar) -> str:
     return str(value)
 
 
-def _filter_text(column: Column, spec: Filter) -> str:
+def _filter_text(column: Column, spec: Filter, noun: str) -> str:
     name = _human(spec.column)
     if spec.op in LIST_OPS:
         values = ", ".join(_value_text(v) for v in spec.value)
         return f"{name} is {'one' if spec.op == 'in' else 'none'} of {values}"
     if column.kind == "bool" and spec.column.startswith("is_"):
         holds = (spec.op == "eq") == spec.value
-        return f"it is {'' if holds else 'not '}{_human(spec.column[3:])}"
+        singular = noun[:-1] if noun.endswith("s") else noun
+        return f"the {singular} is {'' if holds else 'not '}{_human(spec.column[3:])}"
     value = _value_text(spec.value)
     if spec.op == "eq":
         return f"{name} is {value}"
@@ -475,7 +476,7 @@ def _describe(plan: QueryPlan, schema: FrameSchema) -> str:
 
     if plan.filters:
         text += " where " + " and ".join(
-            _filter_text(schema.columns[f.column], f) for f in plan.filters
+            _filter_text(schema.columns[f.column], f, schema.noun) for f in plan.filters
         )
     if spec is None and plan.columns:
         text += ", showing " + ", ".join(_human(c) for c in plan.columns)

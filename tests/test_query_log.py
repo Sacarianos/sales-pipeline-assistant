@@ -67,7 +67,7 @@ def test_a_decline_is_recorded_with_its_reason_and_no_plan(data, log):
 
 def test_a_rejected_plan_is_recorded_with_the_plan_and_the_reason(data, log):
     plan = {"frame": "deals_q2", "group_by": ["region"], "aggregate": {"function": "count"}}
-    _ask("which territory has the most pipeline", data, log, plan)
+    _ask("which part of the country has the most pipeline", data, log, plan)
 
     [record] = log.records()
     assert record.outcome == "rejected"

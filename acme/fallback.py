@@ -63,10 +63,11 @@ HIDDEN_COLUMNS = frozenset(column for topic in REFUSED_TOPICS for column in topi
 # Totals, averages, and listings of these columns are dollar figures.
 CURRENCY_COLUMNS = frozenset({"deal_value", "quota", "quota_q1_2026", "quota_q2_2026"})
 
-# A result this small can be summarized as individually labelled Facts a
-# narrator could cite. Above it, no per-row facts are produced at all, so the
-# verifier has nothing to let a citation of an unvetted row pass against, and
-# the template's row count is what publishes instead.
+# How many rows of a result become individually labelled Facts the narrator
+# can cite. A longer result gives the narrator its first rows, in the order
+# the query sorted them, which for a "top accounts" question is the answer.
+# With no row facts at all, the narrator once wrote that the answer wasn't
+# determinable, with the answer in the table under it.
 FACT_ROW_CAP = 8
 
 TOOL_NAME = "plan_query"
@@ -130,6 +131,13 @@ def _system_prompt(data: Data) -> str:
         "- If the question needs a column that isn't listed above, set "
         "decline_reason and leave every other field out. Decline rather "
         "than substitute the nearest-looking column.\n"
+        + "".join(
+            f"- Questions about {' or '.join((topic.label, *topic.aliases))} are "
+            "refused on purpose, because the data holds two definitions of it "
+            "that disagree. Set decline_reason to say so, and never answer it "
+            "with another column, such as segment, in its place.\n"
+            for topic in REFUSED_TOPICS
+        )
     )
 
 
@@ -173,9 +181,9 @@ def facts_for(plan: QueryPlan, result: QueryResult) -> dict[str, Fact]:
     """Facts for whatever shape the plan returned.
 
     The count of rows the filters matched is always a fact, so the narrator
-    always has one true thing it can say. Individual row values join it only
-    up to `FACT_ROW_CAP`. Past that, no per-row facts exist at all, so the
-    verifier has nothing to validate an unvetted row citation against.
+    always has one true thing it can say. The first `FACT_ROW_CAP` rows of a
+    tabular result join it as labelled facts, and a longer result says how
+    many of its rows were described.
     """
     facts = {"matched_rows": Fact(float(result.matched_rows), Unit.COUNT, "Rows the filters matched")}
     value = result.value
@@ -188,7 +196,9 @@ def facts_for(plan: QueryPlan, result: QueryResult) -> dict[str, Fact]:
 
     facts["row_count"] = Fact(float(result.row_count), Unit.COUNT, "Rows returned by the query")
     if len(value) > FACT_ROW_CAP:
-        return facts
+        facts["rows_described"] = Fact(
+            float(FACT_ROW_CAP), Unit.COUNT, "Rows described below, the first in the query's order"
+        )
     # A grouped result is labelled by its group keys. A listing is labelled
     # by its first two text columns, so a deal reads as its ID and account
     # and the label still fits the figures panel.
@@ -198,7 +208,7 @@ def facts_for(plan: QueryPlan, result: QueryResult) -> dict[str, Fact]:
     else:
         label_columns = [c for c in value.columns if c not in numeric][:2]
     value_columns = [c for c in numeric if c not in label_columns]
-    for i, row in enumerate(value.to_dict("records")):
+    for i, row in enumerate(value.head(FACT_ROW_CAP).to_dict("records")):
         names = ["blank" if pd.isna(row[c]) else str(row[c]) for c in label_columns]
         label = " / ".join(names) if names else f"row {i + 1}"
         for column in value_columns:

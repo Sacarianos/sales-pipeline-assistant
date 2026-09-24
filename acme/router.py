@@ -285,6 +285,10 @@ class RefusedTopic:
     word_pattern: str
     values: Callable[[Catalog], tuple[str, ...]]
     reason: Callable[[Catalog], str]
+    # Other words people use for the topic. The exploratory generator is told
+    # to decline all of them, since a model that can't see the withheld
+    # columns will otherwise reach for the nearest one it can.
+    aliases: tuple[str, ...] = ()
     # The frame columns the topic rests on. The fallback lane hides them from
     # every plan, so a question that never says the topic's name still can't
     # reach the data behind it.
@@ -294,7 +298,8 @@ class RefusedTopic:
 REFUSED_TOPICS: tuple[RefusedTopic, ...] = (
     RefusedTopic(
         label="region",
-        word_pattern=r"\bregions?\b",
+        word_pattern=r"\b(regions?|territor(y|ies)|geograph(y|ies))\b",
+        aliases=("territory", "geography"),
         values=lambda catalog: catalog.regions,
         reason=lambda catalog: catalog.region_refusal_reason(),
         columns=("region", "rep_region"),

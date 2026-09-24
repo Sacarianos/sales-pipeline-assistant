@@ -14,11 +14,19 @@ from .catalog import Catalog, build_catalog
 from .domain import Answer, Answered, Refused
 from .flags import evaluate as evaluate_flags
 from .loading import Data
-from .query_log import QueryLog
 from .narrator import narrate
+from .query_log import QueryLog
 from .registry import MetricRequest
 from .router import route
 from .validation import validate
+
+
+def _sentence(text: str) -> str:
+    """A reason as a sentence of its own. The model writes some of these and
+    the lane writes others, so only the first letter is touched, and only to
+    capitalize it. Lowercasing would turn "Slack" into "slack"."""
+    text = text.strip().rstrip(".")
+    return text[:1].upper() + text[1:] + "."
 
 
 def ask(
@@ -49,7 +57,7 @@ def ask(
     if error is not None:
         reason = error.reason
         if isinstance(declined, fallback.Declined):
-            reason = f"{reason.rstrip('.')}. An exploratory query was tried too, and {declined.reason.rstrip('.')}."
+            reason = f"{reason.rstrip('.')}. An exploratory query was tried too. {_sentence(declined.reason)}"
         return Refused(
             reason=reason,
             hint=catalog.coverage_hint(),

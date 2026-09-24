@@ -12,6 +12,8 @@ pinned directly and not only inferred.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from acme import config, fallback
@@ -273,7 +275,7 @@ def test_a_decline_tells_the_reader_why(data):
     answer = ask("what did our Slack sentiment look like", data, client)
 
     assert isinstance(answer, Refused)
-    assert "no column in these frames covers Slack sentiment" in answer.reason
+    assert "No column in these frames covers Slack sentiment." in answer.reason
 
 
 @pytest.mark.parametrize(
@@ -302,7 +304,7 @@ def test_generated_code_is_never_run(data, tmp_path, payload):
 
 def test_a_plan_over_either_region_column_refuses(data):
     """Region refuses ahead of both lanes when the question says "region".
-    A question that avoids the word, like "which territory", used to reach
+    A question that avoids the word, like "which part of the country", reaches
     the fallback, which grouped by the deal-side region column and picked a
     definition silently. The region columns are hidden from the plan now,
     so that plan is rejected before it runs, and the refusal says the
@@ -316,7 +318,7 @@ def test_a_plan_over_either_region_column_refuses(data):
                 "aggregate": {"function": "sum", "column": "deal_value"},
             },
         )
-        answer = ask("which territory has the most pipeline", data, client)
+        answer = ask("which part of the country has the most pipeline", data, client)
 
         assert isinstance(answer, Refused)
         assert f"'{column}' is withheld" in answer.reason
@@ -325,8 +327,78 @@ def test_a_plan_over_either_region_column_refuses(data):
 def test_the_generator_is_never_shown_a_region_column(data):
     prompt = fallback._system_prompt(data)
     schema = fallback._tool_schema(data)
-    assert "region" not in prompt
+    column_lines = [line for line in prompt.splitlines() if line.strip().startswith("- ") and "(" in line]
+    assert not any("region" in line for line in column_lines)
     assert "region" not in str(schema)
+
+
+def test_the_generator_is_told_to_decline_a_refused_topic_rather_than_substitute(data):
+    """Found live: "which territory has the most pipeline" came back as
+    segment totals, since the region columns were withheld and segment was
+    the nearest column left. Withholding a column isn't enough when the
+    model can't tell a refused topic from a missing one."""
+    prompt = fallback._system_prompt(data)
+    assert "region" in prompt and "territory" in prompt
+    assert "never answer it with another column" in prompt
+
+
+def test_territory_refuses_as_region_before_any_model_call(data):
+    client = FallbackStubClient(router_input=_unsupported_input(), plan_input={"frame": "deals_q2"})
+    answer = ask("which territory has the most pipeline", data, client)
+
+    assert isinstance(answer, Refused)
+    assert "Region is out of scope" in answer.reason
+    assert client.calls == []
+
+
+def test_a_long_result_still_gives_the_narrator_its_first_rows(data):
+    """Found live: a top-20 accounts answer gave the narrator only two
+    counts, and it wrote that the answer wasn't determinable, with the
+    answer in the table right under it."""
+    client = FallbackStubClient(
+        router_input=_unsupported_input(),
+        plan_input={
+            "frame": "deals_q2",
+            "group_by": ["account_name"],
+            "aggregate": {"function": "sum", "column": "deal_value"},
+            "sort_by": "result",
+            "limit": 20,
+        },
+    )
+    answer = ask("which accounts have the most pipeline", data, client)
+
+    assert isinstance(answer, Answered)
+    row_facts = [key for key in answer.facts if re.match(r"row\d+_", key)]
+    assert len(row_facts) == fallback.FACT_ROW_CAP
+    assert answer.facts["rows_described"].value == fallback.FACT_ROW_CAP
+    assert "row7_sum_deal_value" in answer.facts
+    assert "row8_sum_deal_value" not in answer.facts
+
+
+def test_a_decline_reason_stands_as_its_own_sentence(data):
+    """Found live: splicing the model's reason in after "and" either left a
+    capital mid-sentence or, lowercased, turned "Slack" into "slack"."""
+    client = FallbackStubClient(
+        router_input=_unsupported_input(),
+        plan_input={"decline_reason": "Slack sentiment isn't in these frames."},
+    )
+    answer = ask("what did our Slack sentiment look like", data, client)
+
+    assert isinstance(answer, Refused)
+    assert answer.reason.endswith(
+        "An exploratory query was tried too. Slack sentiment isn't in these frames."
+    )
+
+
+def test_a_rejection_reason_stands_as_its_own_sentence(data):
+    client = FallbackStubClient(
+        router_input=_unsupported_input(),
+        plan_input={"frame": "deals_q2", "group_by": ["region"], "aggregate": {"function": "count"}},
+    )
+    answer = ask("which part of the country has the most pipeline", data, client)
+
+    assert isinstance(answer, Refused)
+    assert "An exploratory query was tried too. The query written for it was rejected: " in answer.reason
 
 
 def test_an_exploratory_answer_says_in_plain_english_what_it_computed(data):
@@ -347,6 +419,21 @@ def test_an_exploratory_answer_says_in_plain_english_what_it_computed(data):
         "Number of deals in the Q2 snapshot where stage is Closed Lost, "
         "grouped by loss reason, sorted by the result, highest first."
     )
+
+
+def test_a_true_or_false_filter_reads_naturally_for_deals(data):
+    client = FallbackStubClient(
+        router_input=_unsupported_input(),
+        plan_input={
+            "frame": "deals_q2",
+            "filters": [{"column": "is_lost", "op": "eq", "value": True}],
+            "aggregate": {"function": "count"},
+        },
+    )
+    answer = ask("how many deals did we lose", data, client)
+
+    assert isinstance(answer, Answered)
+    assert answer.query_description == "Number of deals in the Q2 snapshot where the deal is lost."
     assert answer.query_description in answer.restated
 
 

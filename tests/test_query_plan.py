@@ -224,7 +224,7 @@ def test_a_true_or_false_column_reads_naturally_in_the_description():
             aggregate={"function": "count"},
         )
     )
-    assert outcome.description == "Number of rows in the deals frame where it is not won."
+    assert outcome.description == "Number of rows in the deals frame where the row is not won."
 
 
 def test_the_tool_schema_enumerates_frames_and_columns_but_never_a_hidden_one():

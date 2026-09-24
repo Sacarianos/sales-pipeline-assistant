@@ -23,8 +23,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
+import pandas as pd
+
 from .definitions import definition, title
-from .domain import Flag, Intent, Result
+from .domain import UNSUPPORTED, Flag, Intent, Result
 from .loading import CLOSED_LOST, CLOSED_STAGES, Data
 from .periods import date_for_day_of_quarter, day_of_quarter, days_in_quarter, is_in_progress
 
@@ -61,6 +63,12 @@ def partial_period(intent: Intent, result: Result, data: Data) -> Flag | None:
 SMALL_SAMPLE_THRESHOLD = 5
 
 
+def _rows_are_deals(result: Result) -> bool:
+    """Whether an answer's source rows are deals. A promoted metric can read
+    quota or rep rows instead, and the deal-count rules don't apply there."""
+    return "deal_id" in result.source_rows.columns
+
+
 @rule
 def small_sample(intent: Intent, result: Result, data: Data) -> Flag | None:
     """A headline number resting on very few deals, first seen at rep grouping.
@@ -70,7 +78,7 @@ def small_sample(intent: Intent, result: Result, data: Data) -> Flag | None:
     checked here is the same row count the source-rows panel shows.
     """
     count = len(result.source_rows)
-    if count >= SMALL_SAMPLE_THRESHOLD:
+    if not _rows_are_deals(result) or count >= SMALL_SAMPLE_THRESHOLD:
         return None
     return Flag(
         kind="small_sample",
@@ -171,7 +179,7 @@ def changed_deals(intent: Intent, result: Result, data: Data) -> Flag | None:
     """Deals in this answer's own source rows that differ between the two
     snapshots, so a leader who remembers a different figure for a deal they
     know understands why before assuming the tool is wrong."""
-    if result.source_rows.empty or data.change_log.empty:
+    if not _rows_are_deals(result) or result.source_rows.empty or data.change_log.empty:
         return None
     present = set(result.source_rows["deal_id"]) & set(data.change_log["deal_id"])
     if not present:
@@ -291,8 +299,43 @@ def _definition_flags(result: Result) -> list[Flag]:
     ]
 
 
+def _run_rules(rules: tuple[Rule, ...], intent: Intent, result: Result, data: Data) -> tuple[Flag, ...]:
+    return tuple(flag for fn in rules for flag in (fn(intent, result, data),) if flag)
+
+
 def evaluate(intent: Intent, result: Result, data: Data) -> tuple[Flag, ...]:
     """Run every rule, then append one definition flag per key the metric named."""
-    flags = [flag for fn in _RULES for flag in (fn(intent, result, data),) if flag]
+    flags = list(_run_rules(tuple(_RULES), intent, result, data))
     flags.extend(_definition_flags(result))
     return tuple(flags)
+
+
+# The rules that are properties of a snapshot on their own, independent of
+# which rows a specific answer's result carries. Used for the fallback lane,
+# whose result has no equivalent of a metric's `Result.source_rows`: a
+# generated expression's result can be an aggregate with no deal-level rows
+# to check small_sample or changed_deals against - a loss-reason
+# value_counts table has no "5 deals" to be a small sample of, and running
+# those two rules against the whole snapshot instead would flag most of it
+# on every answer, which is noise, not a caveat. snapshot_divergence,
+# invented_risk_rule, and backloading are metric-specific by construction
+# (they key off `intent.metric` or a metric's own fact names) and are left
+# out for the same reason.
+_SNAPSHOT_RULES: tuple[Rule, ...] = (partial_period, stale_close_date, missing_field, unknown_stage)
+
+
+def evaluate_for_snapshot(period: str, snapshot: str, data: Data) -> tuple[Flag, ...]:
+    """Partial period, stale close date, missing loss reason, and an
+    unrecognized stage - the caveats that hold for a snapshot regardless of
+    which rows within it a particular answer read."""
+    intent = Intent(metric=UNSUPPORTED, period=period, restated="")
+    result = Result(
+        facts={},
+        table=pd.DataFrame(),
+        source_rows=pd.DataFrame(),
+        filters={},
+        snapshot=snapshot,
+        definition_keys=(),
+        template="",
+    )
+    return _run_rules(_SNAPSHOT_RULES, intent, result, data)

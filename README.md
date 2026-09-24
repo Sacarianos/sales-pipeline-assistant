@@ -6,13 +6,16 @@ assumption laid out next to it.
 
 The previous AI reporting tool at Acme invented a number in front of the
 CCO, and it's unusable now regardless of how often it happens to be right.
-This one is built so that failure mode can't recur: the language model is
-used exactly twice per question and never produces a number.
+This one is built so that failure mode can't recur: the language model
+never produces a number. A question a defined metric covers makes two model
+calls, and a question outside the catalog makes a third.
 
 ## The trust argument
 
-The model is called exactly twice per question, and neither call touches a
-data row on the way to producing a figure.
+A question a registered metric answers makes exactly two model calls, and
+neither touches a data row on the way to producing a figure. A question
+outside the catalog makes a third call, covered under the exploratory lane
+below, and that one never sees a data row either.
 
 **Call one, the router.** It reads the question and calls a single forced
 tool whose schema is the structured `Intent` the rest of the system runs on:
@@ -48,6 +51,12 @@ covers an outright API failure or timeout. There is always something correct
 to show; the worst case is a boring sentence, never an empty screen or an
 invented number.
 
+An identifier like a deal ID `OPP-079` or a period `Q2-2026` is checked as
+one token instead: it has to appear in a fact's label or in the restatement,
+so the narrator can name a deal it was given and can't name one it wasn't.
+[ADR-0008](docs/adr/0008-verifier-checks-identifiers-as-whole-tokens.md) has
+the reasoning.
+
 That fallback is not a rare edge case reserved for outages. During
 implementation, a live run of "which reps are at risk of missing Q2" had the
 narrator write "best-case coverage above 100%", a true statement, but 100 is
@@ -63,11 +72,12 @@ quotas into one row per rep per period, join rep attributes onto deals, and
 diff the two snapshots into a reconciliation change log.
 
 Query time is a straight line with one early exit: route, validate, compute,
-flag, narrate, verify, render. There's no agent loop, no tool cycle, no
+flag, narrate, verify, render. A question no metric covers takes a second
+line of the same shape. There's no agent loop, no tool cycle, no
 cross-turn state, and no orchestration framework underneath it. Every layer
 between the question and the pandas call is a layer that has to survive
 being explained to a skeptical executive, and a framework doesn't clear that
-bar for two single-shot model calls.
+bar for a few single-shot model calls.
 
 ```
 question
@@ -76,6 +86,11 @@ question
   -> metric.compute() (pandas only, produces Facts + a template sentence)
   -> flags (partial period, definitions, data-quality, snapshot divergence, ...)
   -> narrator (LLM call 2, facts only) -> verifier -> Answered | Refused
+
+no metric matched, and not a refused topic:
+  -> generator (LLM call 2, tool-forced, schema-only prompt) -> query plan
+  -> plan check + run (one frame, pandas written by hand, region withheld)
+  -> flags -> narrator (LLM call 3) -> verifier -> Answered (exploratory) | Refused
 ```
 
 **The catalog is the single source of truth.** It's built by walking the
@@ -130,10 +145,58 @@ written string. Product line was refused alongside region early on for the
 same reason, and that reasoning didn't hold up: unlike region, product line
 has no second, disagreeing source to refuse over, just a single clean tag
 per deal and an assumption worth disclosing rather than a reason to
-withhold. Anything outside the catalog entirely (Slack sentiment, forecasts,
-account-level questions) refuses with the coverage list read off the same
-catalog the router prompt uses, so the refusal reads as a boundary the
-system knows about, not a gap it's hiding.
+withhold. A question outside the catalog goes to the exploratory lane
+below. When that lane can't answer either, as with Slack sentiment or
+forecasts, which no column covers, the refusal carries the coverage list read
+off the same catalog the router prompt uses, plus the reason the exploratory
+lane gave. It reads as a boundary the system knows about, not a gap it's
+hiding.
+
+## The exploratory lane
+
+A question no metric covers, like loss reasons, stage breakdowns, or top
+accounts, doesn't have to dead-end. A third model call fills a structured
+query plan: one frame, filters, grouping, one aggregate, sort, and limit. The
+model sees column names, kinds, and the values of low-cardinality columns,
+never a data row. `acme/query_plan.py` checks the plan against the frame
+schemas and runs it with pandas written by hand, so nothing the model writes
+ever executes. [ADR-0007](docs/adr/0007-fallback-runs-a-structured-query-plan.md)
+covers why this replaced an earlier sandbox that ran model-written pandas.
+
+The figures still come from pandas, and the prose is still verified against
+them. What nobody has pinned down is whether the plan asked what the reader
+meant. So the answer leads with a red warning, then the query as a plain
+English sentence, then the equivalent pandas an analyst can rerun, and it
+never gets the verified-metric badge.
+
+A registered metric always wins over this lane, and region stays refused
+ahead of both. The region columns are withheld from every plan too, so a
+question like "which territory has the most pipeline" can't reach them just
+by avoiding the word.
+
+## Promoting an exploratory plan
+
+A question that keeps landing in the exploratory lane probably deserves a
+metric. Every exploratory attempt is logged locally, and a command line turns
+a recurring plan into a metric file:
+
+```bash
+python -m acme.promote list
+```
+
+`list` groups logged plans that mean the same thing once snapshot, period,
+and segment, rep, or manager scope are set aside, most asked first. Then:
+
+```bash
+python -m acme.promote promote c70a2dad --name loss_reasons --description "Closed-lost deals in the period, counted by the loss reason the rep recorded." --grouping segment
+```
+
+The definition has to be written by a person. The tool refuses an empty one,
+a short one, or a copy of its own description of the plan, and it test-runs
+the metric for every period and grouping before writing anything. The file
+it writes is an ordinary metric under `acme/metrics/`, so after a restart
+the question answers in the metric lane with the verified badge. The spec is
+[`docs/specs/v3-promote-to-metric.md`](docs/specs/v3-promote-to-metric.md).
 
 ## Setup
 
@@ -172,6 +235,26 @@ Tests go in through the same seam a user does (`ask(question, data, client)`)
 and assert on what reaches the screen, using a stub client shaped like
 `anthropic.Anthropic` rather than a live API key, so the suite is
 deterministic and free to run.
+
+## Evals
+
+The tests prove the code does what it says with a scripted model. They can't
+prove the real models read questions correctly, and a misread question is
+the one failure the verifier can't catch, since it still produces a real
+number. The evals run 30 questions through `ask` with the real client:
+
+```bash
+python -m evals.run --repeat 3
+```
+
+Metric questions are scored on the router's reading. Exploratory questions
+are scored on their figures against a pandas reference, so two different
+plans that compute the same thing both pass. Refusals are scored on nothing
+being answered, and for region, on no model being asked at all. Each run
+saves its results under `evals/results/` and lists every case whose pass
+rate changed since the last one. When the narrator's prose is blocked, the
+report shows the draft and the figures that failed, which is how the first
+runs found the problems ADR-0008 and the eval regression tests fix.
 
 ## Adding a metric: a worked example
 
@@ -244,6 +327,8 @@ verifier can't catch, since a wrong metric or a wrong filter produces a
 figure that's internally consistent and still answers the wrong question, so
 that call gets the stronger model. The narrator uses
 `claude-haiku-4-5-20251001`, since writing two or three sentences from a
-mapping with arithmetic forbidden is the cheapest task in the system. Both
-IDs live in `acme/config.py` as named constants, not inline strings, so
-changing either model is a one-line edit.
+mapping with arithmetic forbidden is the cheapest task in the system. The
+exploratory lane's generator uses the router's model too, since a wrong plan
+is a wrong answer in the same way a misroute is. Both IDs live in
+`acme/config.py` as named constants, not inline strings, so changing
+either model is a one-line edit.

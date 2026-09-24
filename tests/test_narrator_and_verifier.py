@@ -103,7 +103,9 @@ def test_successful_verification_publishes_prose_with_a_verified_count(data):
     assert isinstance(answer, Answered)
     assert answer.prose_source == "narrator"
     assert answer.narrator_blocked is False
-    assert answer.verified_figures == 4  # 2026, 8.4, 518,000, 6,200,000
+    # 8.4, 518,000, 6,200,000. "Q2-2026" is checked too, as a period the
+    # restatement names, but a period label isn't a figure (ADR-0008).
+    assert answer.verified_figures == 3
     assert answer.prose == client.narrator_text
 
 

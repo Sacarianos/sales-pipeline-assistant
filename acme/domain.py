@@ -23,6 +23,10 @@ class Unit(str, Enum):
     PERCENT = "percent"
     COUNT = "count"
     DATE = "date"
+    # A computed number with no pinned business meaning. The fallback lane
+    # uses it when a query's result isn't a dollar figure or a count, like
+    # the average of a column that isn't money.
+    NUMBER = "number"
 
 
 @dataclass(frozen=True)
@@ -45,6 +49,10 @@ class Fact:
             return f"{self.value:.1f}%"
         if self.unit is Unit.COUNT:
             return f"{self.value:,.0f}"
+        if self.unit is Unit.NUMBER:
+            if float(self.value).is_integer():
+                return f"{self.value:,.0f}"
+            return f"{self.value:,.2f}"
         return f"{self.value:.0f}"
 
 
@@ -56,7 +64,14 @@ class Intent(BaseModel):
     """
 
     metric: str = Field(description="Metric name from the catalog, or 'unsupported'.")
-    grouping: str = Field(default="overall", description="overall, segment, rep, or manager.")
+    grouping: str = Field(
+        default="overall",
+        description=(
+            "The scope the question asks about: 'overall', or one named segment, "
+            "rep, or manager, with that name set in its own field. A question "
+            "about every rep, like 'which reps are at risk', is 'overall'."
+        ),
+    )
     period: str = Field(description="Period key such as Q2-2026.")
     comparison_period: str | None = Field(default=None)
     segment: str | None = Field(default=None)
@@ -64,6 +79,12 @@ class Intent(BaseModel):
     manager: str | None = Field(default=None)
     restated: str = Field(description="One sentence restating how the question was read.")
     unsupported_reason: str | None = Field(default=None)
+    # Why the metric is 'unsupported'. 'no_metric' means the data might answer
+    # it but no registered metric does, so the exploratory lane may try.
+    # 'ambiguous' means the question could mean more than one thing, so
+    # nothing tries: guessing which is exactly the silent substitution this
+    # system refuses.
+    unsupported_kind: Literal["no_metric", "ambiguous"] | None = Field(default=None)
 
     def is_unsupported(self) -> bool:
         return self.metric == UNSUPPORTED
@@ -110,6 +131,26 @@ class Answered:
     """A question that was routed, validated, computed, flagged, and rendered."""
 
     kind: Literal["answered"] = field(default="answered", init=False)
+    # "metric" for a registered metric's answer, "exploratory" for the
+    # fallback lane's. One field on one variant rather than a parallel
+    # Answered type, so every consumer that already handles an answer keeps
+    # working and the interface decides what to draw from this alone.
+    lane: Literal["metric", "exploratory"] = "metric"
+    # Set only when `lane` is "exploratory". The query a model chose is the
+    # one thing a reader can't otherwise check about this answer, so it
+    # travels with the answer in two forms, both built from the query plan
+    # and never from model prose. `query_description` is plain English for
+    # the reader. `expression` is the equivalent pandas an analyst can paste
+    # into a notebook to reproduce the figure.
+    query_description: str = ""
+    expression: str = ""
+    # The one sentence restating how the question was read, rendered inside
+    # the answer itself. For the metric lane this is `intent.restated`; the
+    # fallback lane has no `Intent` (it never went through the router's
+    # structured reading) but still owes the reader the same backstop
+    # against a silent misroute, so it's a field every lane sets directly
+    # rather than something derived only from `intent`.
+    restated: str = ""
     prose: str = ""
     prose_source: Literal["narrator", "template"] = "template"
     verified_figures: int | None = None
@@ -118,6 +159,10 @@ class Answered:
     # than because narration was never attempted (no client). Drives the
     # "blocked" badge, distinct from having no badge at all.
     narrator_blocked: bool = False
+    # When verification blocked the narrator, its draft and the figures in it
+    # that matched no fact. For diagnosis and evals, never drawn on screen.
+    blocked_draft: str = ""
+    unmatched_figures: tuple[str, ...] = ()
     facts: dict[str, Fact] = field(default_factory=dict)
     flags: tuple[Flag, ...] = ()
     table: pd.DataFrame = field(default_factory=pd.DataFrame)
@@ -126,10 +171,6 @@ class Answered:
     snapshot: str = ""
     intent: Intent | None = None
     router_mode: Literal["online", "offline"] = "offline"
-
-    @property
-    def restated(self) -> str:
-        return self.intent.restated if self.intent else ""
 
     @property
     def row_count(self) -> int:

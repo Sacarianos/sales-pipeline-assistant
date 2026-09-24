@@ -98,6 +98,27 @@ A numeric token in narrator prose that matches a Fact's value, or an honest
 rounding of it, within tolerance.
 _Avoid_: validated number
 
+**Query plan**:
+What the exploratory fallback lane asks a model for when no registered metric
+covers a question: one frame, filters, grouping, one aggregate, sort, and
+limit. Checked against the frame schemas and run by code written by hand, so
+nothing the model writes executes. Shown to the reader as a plain English
+sentence and to an analyst as the equivalent pandas.
+_Avoid_: generated query, expression, SQL
+
+**Withheld column**:
+A column a refused topic rests on, like region on the deal and region on the
+rep. It is left out of every query plan's schema, and a plan naming one is
+rejected, so the fallback lane can't answer a refused topic under another name.
+_Avoid_: hidden field, blocked column
+
+**Promoted metric**:
+A registered metric made from a query plan that kept recurring in the query
+log. A person names it, writes its definition, and picks its groupings. The
+plan becomes data in the metric file, and each question runs it for the
+asked period and scope, from the snapshot that owns that period.
+_Avoid_: saved query, learned metric
+
 ## Reconciliation change types
 
 One row per deal per outer join of `q1_snap` and `q2_snap`.

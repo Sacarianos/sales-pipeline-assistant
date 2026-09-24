@@ -31,6 +31,10 @@ class Narration:
     source: Source
     verified_figures: int | None
     blocked: bool
+    # The model's prose when verification blocked it, and the figures in it
+    # that matched no fact. Kept for diagnosis, never published.
+    draft: str = ""
+    unmatched: tuple[str, ...] = ()
 
 
 SYSTEM_PROMPT = (
@@ -93,9 +97,12 @@ def narrate(
     if prose is None:
         return Narration(prose=template, source="template", verified_figures=None, blocked=True)
 
-    result = verify(prose, facts)
+    result = verify(prose, facts, context=restated)
     if not result.ok:
-        return Narration(prose=template, source="template", verified_figures=None, blocked=True)
+        return Narration(
+            prose=template, source="template", verified_figures=None, blocked=True,
+            draft=prose, unmatched=result.unmatched,
+        )
 
     return Narration(
         prose=prose, source="narrator", verified_figures=result.verified_count, blocked=False

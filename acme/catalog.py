@@ -70,6 +70,7 @@ class Catalog:
         )
 
 
+
 def _ordered(values) -> tuple[str, ...]:
     return tuple(sorted({str(v) for v in values if str(v) != "nan"}))
 

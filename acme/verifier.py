@@ -8,6 +8,13 @@ No token is exempt by pattern — a number that belongs in prose but isn't a
 metric output, such as the period year, is supplied to the narrator as a fact
 rather than carved out of this check (see ADR-0003).
 
+An identifier like a deal ID "OPP-079" or a period "Q2-2026" is checked as
+one token, not as the number inside it, and it has to appear in a fact's
+label or in the restatement the narrator was given (see ADR-0008). Reading
+"OPP-079" as the figure 79 blocked every answer that named a deal, and
+skipping identifiers instead would let the narrator name a deal that
+doesn't exist.
+
 Variant generation never changes a value's magnitude. A currency fact gets a
 rounding to the nearest whole dollar and nothing else, which absorbs float
 summation noise without ever admitting a thousands or millions shorthand —
@@ -26,6 +33,9 @@ from .domain import Fact, Unit
 
 NUMBER_TOKEN = re.compile(r"\$?\b\d[\d,]*(?:\.\d+)?%?")
 
+# Letters, then a hyphen and digits: OPP-079, Q2-2026.
+IDENTIFIER = re.compile(r"\b[A-Za-z][A-Za-z0-9]*-\d[\d-]*\b")
+
 TOLERANCE = 1e-6
 
 
@@ -33,14 +43,18 @@ TOLERANCE = 1e-6
 class Verification:
     ok: bool
     verified_count: int
+    # Every figure or identifier in the prose that matched nothing it was
+    # given, as written, for diagnosis.
+    unmatched: tuple[str, ...] = ()
 
 
-def _extract_tokens(prose: str) -> list[float]:
+def _extract_tokens(prose: str) -> list[tuple[str, float]]:
+    """Every numeric token outside an identifier, as written and as a value."""
     tokens = []
-    for raw in NUMBER_TOKEN.findall(prose):
+    for raw in NUMBER_TOKEN.findall(IDENTIFIER.sub(" ", prose)):
         cleaned = raw.replace("$", "").replace(",", "").replace("%", "")
         if cleaned and cleaned != ".":
-            tokens.append(float(cleaned))
+            tokens.append((raw, float(cleaned)))
     return tokens
 
 
@@ -63,14 +77,16 @@ def _matches(token: float, allowed: set[float]) -> bool:
     return any(abs(token - value) <= TOLERANCE for value in allowed)
 
 
-def verify(prose: str, facts: dict[str, Fact]) -> Verification:
+def verify(prose: str, facts: dict[str, Fact], context: str = "") -> Verification:
     """Every numeric token in `prose` must match a fact or an honest variant
     of one. A single mismatch fails the whole paragraph — the caller falls
     back to the deterministic template rather than publishing anything
     partially wrong."""
     tokens = _extract_tokens(prose)
     allowed = _allowed_values(facts)
-    for token in tokens:
-        if not _matches(token, allowed):
-            return Verification(ok=False, verified_count=0)
+    supplied = " ".join([context, *(fact.label for fact in facts.values())])
+    unmatched = tuple(raw for raw, value in tokens if not _matches(value, allowed))
+    unmatched += tuple(ident for ident in IDENTIFIER.findall(prose) if ident not in supplied)
+    if unmatched:
+        return Verification(ok=False, verified_count=0, unmatched=unmatched)
     return Verification(ok=True, verified_count=len(tokens))

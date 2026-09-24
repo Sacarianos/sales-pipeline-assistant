@@ -17,13 +17,22 @@ for region, so the one wrong move available to a model asked about it is
 substituting the nearest segment or rep - a substitution validation can't
 catch, since the substituted value would be a real one. Catching it here,
 ahead of both routers, means it can't happen regardless of which one answers.
+
+Product line was briefly refused here alongside region, and is not any
+more. Region refuses because two definitions of it measurably disagree.
+Product line has no second definition to disagree with, so the refusal was
+resting on an assumption about bundled deals rather than on anything in the
+data, and it now has its own metric with that assumption disclosed as a
+flag. What survives is the rule: a refused topic short-circuits ahead of
+the fallback lane too, so a lane that can answer almost anything never
+becomes the thing that answers a question the system deliberately withheld.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import Callable, Literal
 
 from .catalog import Catalog
 from .config import ROUTER_MODEL
@@ -70,6 +79,11 @@ Mode = Literal["online", "offline"]
 class Routing:
     intent: Intent
     mode: Mode
+    # True for a topic refused ahead of routing entirely, region being the
+    # only one. The pipeline reads this to know a question is refused on
+    # principle rather than merely unmatched, which is what stops it from
+    # ever handing a refused topic to the fallback lane.
+    refused_topic: bool = False
 
 
 def _words(text: str) -> set[str]:
@@ -254,28 +268,64 @@ def restate(
     return sentence + "."
 
 
-REGION_WORD_PATTERN = r"\bregions?\b"
+@dataclass(frozen=True)
+class RefusedTopic:
+    """A topic refused before either router runs, ahead of the fallback
+    lane too.
+
+    Region is the only entry today, and the shape stays generalized anyway
+    because what it captures is the mechanics of a pre-routing refusal:
+    detect the topic, restate the question, quote a reason computed at load
+    time. The reason itself stays each topic's own method on `Catalog`,
+    since reasons do not generalize and pretending they do is how product
+    line briefly ended up refused on region's logic.
+    """
+
+    label: str
+    word_pattern: str
+    values: Callable[[Catalog], tuple[str, ...]]
+    reason: Callable[[Catalog], str]
+    # Other words people use for the topic. The exploratory generator is told
+    # to decline all of them, since a model that can't see the withheld
+    # columns will otherwise reach for the nearest one it can.
+    aliases: tuple[str, ...] = ()
+    # The frame columns the topic rests on. The fallback lane hides them from
+    # every plan, so a question that never says the topic's name still can't
+    # reach the data behind it.
+    columns: tuple[str, ...] = ()
 
 
-def _mentions_region(question: str, catalog: Catalog) -> bool:
+REFUSED_TOPICS: tuple[RefusedTopic, ...] = (
+    RefusedTopic(
+        label="region",
+        word_pattern=r"\b(regions?|territor(y|ies)|geograph(y|ies))\b",
+        aliases=("territory", "geography"),
+        values=lambda catalog: catalog.regions,
+        reason=lambda catalog: catalog.region_refusal_reason(),
+        columns=("region", "rep_region"),
+    ),
+)
+
+
+def _mentions_topic(question: str, topic: RefusedTopic, catalog: Catalog) -> bool:
     lowered = question.lower()
-    if re.search(REGION_WORD_PATTERN, lowered):
+    if re.search(topic.word_pattern, lowered):
         return True
     return any(
-        re.search(rf"\b{re.escape(region.lower())}\b", lowered)
-        for region in catalog.regions
+        re.search(rf"\b{re.escape(value.lower())}\b", lowered)
+        for value in topic.values(catalog)
     )
 
 
-def _region_intent(question: str, catalog: Catalog) -> Intent:
-    """Refuse a region question before either router runs.
+def _refused_topic_intent(question: str, catalog: Catalog, topic: RefusedTopic) -> Intent:
+    """Refuse a question about `topic` before either router runs.
 
-    Reuses `_match_period` so a region refusal still names an assumed quarter
-    the same way any other restatement would, rather than skipping the ADR-0005
+    Reuses `_match_period` so the refusal still names an assumed quarter the
+    same way any other restatement would, rather than skipping the ADR-0005
     caveat just because the question is being refused.
     """
     period, defaulted = _match_period(question, catalog)
-    sentence = f"Reading this as a question about region for {period}"
+    sentence = f"Reading this as a question about {topic.label} for {period}"
     if defaulted:
         sentence += (
             ", the quarter containing the as-of date, "
@@ -287,7 +337,7 @@ def _region_intent(question: str, catalog: Catalog) -> Intent:
         grouping="overall",
         period=period,
         restated=sentence,
-        unsupported_reason=catalog.region_refusal_reason(),
+        unsupported_reason=topic.reason(catalog),
     )
 
 
@@ -397,7 +447,16 @@ def _system_prompt(catalog: Catalog) -> str:
         "above, or asks about something this catalog doesn't cover, set metric "
         "to 'unsupported' and explain why in `unsupported_reason`. Never "
         "substitute the closest match - refusing is cheap, a wrong route is "
-        "expensive.\n"
+        "expensive. Set `unsupported_kind` to 'no_metric' when no metric above "
+        "covers it.\n"
+        "- If the question asks for a metric above at a grouping it doesn't "
+        "answer at, still set that metric and the grouping asked for. The "
+        "system explains the limit. Never mark it unsupported, since another "
+        "part of the system would then improvise the metric.\n"
+        "- If a name or phrase in the question matches more than one segment, "
+        "rep, or manager, set metric to 'unsupported', `unsupported_kind` to "
+        "'ambiguous', and name every match in `unsupported_reason`. Never "
+        "pick one.\n"
         "- `restated` is one sentence restating how you read the question. It "
         "renders directly to the user, so a wrong reading has to be visible in "
         "it alone.\n"
@@ -429,15 +488,21 @@ def route_online(question: str, catalog: Catalog, client: object) -> Routing:
 def route(question: str, catalog: Catalog, client: object | None = None) -> Routing:
     """Route online with the model, falling back to the offline keyword router.
 
-    Region is checked before either router runs and short-circuits both,
-    since `Intent` has no field to hold a region and the one wrong move
-    available to a model asked about it is silently substituting the nearest
-    segment or rep - a substitution validation has no way to catch, because
-    the substituted value would be a real one.
+    Refused topics, region being the only one, are checked before either
+    router runs and short-circuit both, since the one wrong move available
+    to a model asked about one is silently substituting a nearby value - a
+    substitution validation has no way to catch, because the substituted
+    value would be a real one. `refused_topic=True` here is also what stops
+    the pipeline from ever handing the topic to the fallback lane.
     """
-    if _mentions_region(question, catalog):
-        mode: Mode = "online" if client is not None else "offline"
-        return Routing(intent=_region_intent(question, catalog), mode=mode)
+    for topic in REFUSED_TOPICS:
+        if _mentions_topic(question, topic, catalog):
+            mode: Mode = "online" if client is not None else "offline"
+            return Routing(
+                intent=_refused_topic_intent(question, catalog, topic),
+                mode=mode,
+                refused_topic=True,
+            )
 
     if client is not None:
         try:

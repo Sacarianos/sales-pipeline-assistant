@@ -19,6 +19,7 @@ to prevent.
 from __future__ import annotations
 
 import html
+import re
 import time
 from typing import Iterator
 
@@ -29,6 +30,7 @@ from acme import config
 from acme.catalog import build_catalog
 from acme.charts import chart_for
 from acme.domain import Answer, Answered, Flag, Refused
+from acme.query_log import QueryLog
 from acme.loading import load_data
 from acme.pipeline import ask
 
@@ -36,6 +38,38 @@ st.set_page_config(page_title="Acme pipeline assistant", layout="wide")
 
 WORD_DELAY_SECONDS = 0.02
 TRANSCRIPT_HEIGHT = 520
+
+# The one place in this app where alarm is the correct register. Everywhere
+# else the interface keeps caveats legible without making them frightening,
+# because a leader alarmed by a partial-period notice stops reading notices
+# altogether. The risk here is specific and real, since a model chose the
+# query, so the treatment matches it. The arithmetic is computed and checked
+# exactly as a metric's is. What nobody has checked is whether the query
+# asks what the reader meant, and the warning says exactly that.
+EXPLORATORY_WARNING = (
+    "This answer didn't come from a defined metric in the catalog. A model "
+    "chose the query below to answer your question. The figures were "
+    "computed by pandas and the wording of the answer was checked against "
+    "them, the same as a metric's. Nobody has checked that the query asks "
+    "what you meant. Read it before you repeat this figure to anyone."
+)
+EXPLORATORY_BADGE = (
+    "Figures computed and checked against the query above. The query itself "
+    "was chosen by a model."
+)
+NARRATION_BLOCKED_CAPTION = (
+    "⚠ Model output blocked: a figure didn't verify. "
+    "Showing the computed sentence instead."
+)
+
+# Filter values in a query description come from the model, so they're
+# escaped before they reach markdown and can't restyle the line.
+MARKDOWN_SPECIALS = re.compile(r"([\\`*_{}\[\]()#+\-.!|<>$~])")
+
+
+def _markdown_escape(text: str) -> str:
+    return MARKDOWN_SPECIALS.sub(r"\\\1", text)
+
 
 # Nothing here sets a background or a text colour of its own. The app runs in
 # whichever theme the reader has chosen, and painting a light panel into a
@@ -57,6 +91,16 @@ STYLE = """
     border-radius: 999px; padding: .1rem .45rem; margin: 0 .25rem .3rem 0;
   }
   .metric-desc { font-size: .74rem; opacity: .7; line-height: 1.4; margin: 0 0 .45rem 0; }
+
+  /* The one badge in the app that has to read as a warning rather than as
+     a neutral label, so it borrows red rather than the grey every other
+     pill uses - the same distinction the red banner above it draws. */
+  .exploratory-pill {
+    display: inline-block; font-size: .66rem; font-weight: 650; letter-spacing: .03em;
+    text-transform: uppercase; color: #c0392b;
+    background: rgba(192,57,43,.12); border: 1px solid rgba(192,57,43,.4);
+    border-radius: 999px; padding: .12rem .5rem; margin: 0 0 .5rem 0;
+  }
 
   .panel-heading {
     display: flex; align-items: center; gap: .35rem;
@@ -207,17 +251,29 @@ def _render_answer(answer: Answer, *, stream: bool) -> None:
             st.caption(answer.intent.restated)
         return
 
+    if answer.lane == "exploratory":
+        # The warning comes first, above the answer, in the strongest
+        # treatment the interface has. The query follows it straight away
+        # and is never behind a click, since it's the one thing about this
+        # answer a reader can't otherwise check. It shows twice: in plain
+        # English for the reader, then as the pandas an analyst can rerun.
+        st.markdown("<span class='exploratory-pill'>Exploratory</span>", unsafe_allow_html=True)
+        st.error(EXPLORATORY_WARNING)
+        st.markdown(f"**Query:** {_markdown_escape(answer.query_description)}")
+        st.code(answer.expression, language="python", wrap_lines=True)
+
     if stream:
         st.write_stream(_typewriter(answer.prose))
     else:
         st.write(answer.prose)
-    if answer.prose_source == "narrator":
+    if answer.lane == "exploratory":
+        st.caption(EXPLORATORY_BADGE)
+        if answer.narrator_blocked:
+            st.caption(NARRATION_BLOCKED_CAPTION)
+    elif answer.prose_source == "narrator":
         st.caption(f"✓ {answer.verified_figures} figures verified against computed values")
     elif answer.narrator_blocked:
-        st.caption(
-            "⚠ Model output blocked: a figure didn't verify. "
-            "Showing the computed sentence instead."
-        )
+        st.caption(NARRATION_BLOCKED_CAPTION)
 
 
 def _info(key: str) -> str:
@@ -311,10 +367,16 @@ def get_client() -> anthropic.Anthropic | None:
         return None
 
 
+@st.cache_resource
+def get_query_log() -> QueryLog:
+    return QueryLog(config.QUERY_LOG_PATH)
+
+
 st.markdown(STYLE, unsafe_allow_html=True)
 
 data = get_data()
 client = get_client()
+query_log = get_query_log()
 catalog = build_catalog(data)
 
 if "history" not in st.session_state:
@@ -374,7 +436,7 @@ with chat_col:
         with transcript:
             with st.chat_message("user"):
                 st.write(question)
-            answer = ask(question, data, client)
+            answer = ask(question, data, client, log=query_log)
             with st.chat_message("assistant"):
                 # Streamed only here, for the answer this run just computed.
                 # Every later rerun draws it from `history` above, instantly.
@@ -418,3 +480,8 @@ with panel_col:
         st.caption(f"Snapshot answering: {answer.snapshot}")
         if answer.intent is not None:
             st.json(answer.intent.model_dump())
+        elif answer.lane == "exploratory":
+            # No structured Intent exists for this lane - it never went
+            # through the router's reading - so the restatement is what
+            # stands in for the trace an intent would otherwise give.
+            st.caption(answer.restated)

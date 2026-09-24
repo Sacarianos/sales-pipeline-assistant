@@ -220,16 +220,14 @@ answer to the brief's third deliverable ("where does it still fall short").
 
 ## 7. What's explicitly not a V1 compromise
 
-For completeness, two things worth distinguishing from the list above so
-they don't get conflated with it in the report: a second branch
-(`v2-exploratory-fallback`) exists with a structured-query-plan fallback lane
-for questions outside the registered metrics. It originally predated the
-product-line reversal in section 5 and refused product line on the original
-attribution reasoning. Main has since been merged into it and that refusal
-removed: the refused-topic entry, the catalog reason method it called, and
-the load-time count it quoted are gone, and the tests that asserted the
-refusal now assert product line answers in the metric lane. The two are
-consistent. The branch is not part of the V1 submission
-and was built separately, as a demonstration of where the "one file per
-metric" architecture goes next — not a cut made under pressure, and not
-something the V1 artifact depends on or claims to include.
+For completeness, one thing worth keeping apart from the list above: the
+exploratory fallback lane, the query plan it runs, promotion of a plan to a
+metric, and the eval harness were all built after the V1 submission. They
+started on a separate branch, `v2-exploratory-fallback`, and have since been
+merged into main. None of it is a V1 compromise, and the V1 artifact
+doesn't depend on any of it. The submission as it was reviewed is tagged
+`v1-submission`, and everything in this document describes that version.
+
+That branch once refused product line on the attribution reasoning section 5
+walks back. The refusal was removed before the merge, so the two agree:
+product line answers in the metric lane.

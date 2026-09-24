@@ -168,6 +168,30 @@ ahead of both. The region columns are withheld from every plan too, so a
 question like "which territory has the most pipeline" can't reach them just
 by avoiding the word.
 
+## Promoting an exploratory plan
+
+A question that keeps landing in the exploratory lane probably deserves a
+metric. Every exploratory attempt is logged locally, and a command line turns
+a recurring plan into a metric file:
+
+```bash
+python -m acme.promote list
+```
+
+`list` groups logged plans that mean the same thing once snapshot, period,
+and segment, rep, or manager scope are set aside, most asked first. Then:
+
+```bash
+python -m acme.promote promote c70a2dad --name loss_reasons --description "Closed-lost deals in the period, counted by the loss reason the rep recorded." --grouping segment
+```
+
+The definition has to be written by a person. The tool refuses an empty one,
+a short one, or a copy of its own description of the plan, and it test-runs
+the metric for every period and grouping before writing anything. The file
+it writes is an ordinary metric under `acme/metrics/`, so after a restart
+the question answers in the metric lane with the verified badge. The spec is
+[`docs/specs/v3-promote-to-metric.md`](docs/specs/v3-promote-to-metric.md).
+
 ## Setup
 
 ```bash

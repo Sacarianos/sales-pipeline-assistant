@@ -63,6 +63,12 @@ def partial_period(intent: Intent, result: Result, data: Data) -> Flag | None:
 SMALL_SAMPLE_THRESHOLD = 5
 
 
+def _rows_are_deals(result: Result) -> bool:
+    """Whether an answer's source rows are deals. A promoted metric can read
+    quota or rep rows instead, and the deal-count rules don't apply there."""
+    return "deal_id" in result.source_rows.columns
+
+
 @rule
 def small_sample(intent: Intent, result: Result, data: Data) -> Flag | None:
     """A headline number resting on very few deals, first seen at rep grouping.
@@ -72,7 +78,7 @@ def small_sample(intent: Intent, result: Result, data: Data) -> Flag | None:
     checked here is the same row count the source-rows panel shows.
     """
     count = len(result.source_rows)
-    if count >= SMALL_SAMPLE_THRESHOLD:
+    if not _rows_are_deals(result) or count >= SMALL_SAMPLE_THRESHOLD:
         return None
     return Flag(
         kind="small_sample",
@@ -173,7 +179,7 @@ def changed_deals(intent: Intent, result: Result, data: Data) -> Flag | None:
     """Deals in this answer's own source rows that differ between the two
     snapshots, so a leader who remembers a different figure for a deal they
     know understands why before assuming the tool is wrong."""
-    if result.source_rows.empty or data.change_log.empty:
+    if not _rows_are_deals(result) or result.source_rows.empty or data.change_log.empty:
         return None
     present = set(result.source_rows["deal_id"]) & set(data.change_log["deal_id"])
     if not present:

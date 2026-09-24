@@ -172,6 +172,8 @@ class QueryResult:
     row_count: int | None
     truncated: bool
     matched_rows: int
+    # The rows the filters matched, with withheld columns left out.
+    rows: pd.DataFrame
     code: str
     description: str
     result_label: str
@@ -208,7 +210,7 @@ def _is_iso_date(value: object) -> bool:
     return True
 
 
-def _check_values(column: Column, op: str, values: list) -> None:
+def _check_values(column: Column, op: str, values: list, *, trusted: bool = False) -> None:
     if op in ORDERED_OPS and column.kind not in ("number", "date"):
         raise _Rejected(f"can't compare '{column.name}' with {op}, it's a {column.kind} column")
     for value in values:
@@ -222,7 +224,9 @@ def _check_values(column: Column, op: str, values: list) -> None:
             if not _is_iso_date(value):
                 raise _Rejected(f"'{column.name}' needs a date written YYYY-MM-DD")
         elif column.kind == "category":
-            if value not in column.values:
+            if not isinstance(value, str):
+                raise _Rejected(f"'{column.name}' needs text, got {value!r}")
+            if not trusted and value not in column.values:
                 raise _Rejected(
                     f"{value!r} is not a value of '{column.name}'. Its values are {list(column.values)}"
                 )
@@ -230,7 +234,7 @@ def _check_values(column: Column, op: str, values: list) -> None:
             raise _Rejected(f"'{column.name}' needs text, got {value!r}")
 
 
-def _check_filter(column: Column, spec: Filter) -> None:
+def _check_filter(column: Column, spec: Filter, *, trusted: bool = False) -> None:
     if spec.op in LIST_OPS:
         if not isinstance(spec.value, list) or not spec.value:
             raise _Rejected(f"'{spec.op}' needs a list of values")
@@ -239,7 +243,7 @@ def _check_filter(column: Column, spec: Filter) -> None:
         if isinstance(spec.value, list):
             raise _Rejected(f"'{spec.op}' takes a single value, not a list")
         values = [spec.value]
-    _check_values(column, spec.op, values)
+    _check_values(column, spec.op, values, trusted=trusted)
 
 
 def _check_aggregate(spec: Aggregate, lookup: Callable[[str], Column], group_by: list[str]) -> None:
@@ -260,7 +264,9 @@ def _listing_columns(plan: QueryPlan, schema: FrameSchema) -> list[str]:
     return list(plan.columns) or list(schema.columns)
 
 
-def _check(plan: QueryPlan, schemas: dict[str, FrameSchema]) -> FrameSchema:
+def _check(
+    plan: QueryPlan, schemas: dict[str, FrameSchema], trusted_columns: frozenset[str]
+) -> FrameSchema:
     if not plan.frame:
         raise _Rejected("a plan must name a frame")
     schema = schemas.get(plan.frame)
@@ -276,7 +282,7 @@ def _check(plan: QueryPlan, schemas: dict[str, FrameSchema]) -> FrameSchema:
         return column
 
     for spec in plan.filters:
-        _check_filter(lookup(spec.column), spec)
+        _check_filter(lookup(spec.column), spec, trusted=spec.column in trusted_columns)
 
     if len(plan.group_by) > MAX_GROUP_BY:
         raise _Rejected(f"a plan may group by at most {MAX_GROUP_BY} columns")
@@ -373,20 +379,23 @@ def _result_column(spec: Aggregate) -> str:
     return "count" if spec.function == "count" else f"{spec.function}_{spec.column}"
 
 
-def _execute(plan: QueryPlan, schema: FrameSchema, frame: pd.DataFrame) -> tuple[object, int, str]:
+def _execute(
+    plan: QueryPlan, schema: FrameSchema, frame: pd.DataFrame
+) -> tuple[object, pd.DataFrame, str]:
+    """The result, the rows the filters matched, and the code that ran."""
     rows, rows_code = _filter_rows(plan, schema, frame)
     spec = plan.aggregate
 
     if spec is None:
         columns = _listing_columns(plan, schema)
         out, code = _sorted_and_limited(rows[columns], f"{rows_code}[{columns!r}]", plan.sort_by, plan)
-        return out, len(rows), code
+        return out, rows, code
 
     if not plan.group_by:
         if spec.function == "count":
-            return len(rows), len(rows), f"len({rows_code})"
+            return len(rows), rows, f"len({rows_code})"
         value = getattr(rows[spec.column], spec.function)()
-        return _plain(value), len(rows), f"{rows_code}[{spec.column!r}].{spec.function}()"
+        return _plain(value), rows, f"{rows_code}[{spec.column!r}].{spec.function}()"
 
     name = _result_column(spec)
     groups = rows.groupby(plan.group_by, dropna=False)
@@ -401,7 +410,7 @@ def _execute(plan: QueryPlan, schema: FrameSchema, frame: pd.DataFrame) -> tuple
     code += f".reset_index(name={name!r})"
     sort_key = name if plan.sort_by == RESULT else plan.sort_by
     out, code = _sorted_and_limited(out, code, sort_key, plan)
-    return out, len(rows), code
+    return out, rows, code
 
 
 # --- describing -----------------------------------------------------------
@@ -487,16 +496,27 @@ def _describe(plan: QueryPlan, schema: FrameSchema) -> str:
 
 
 def run(
-    plan: QueryPlan, frames: dict[str, pd.DataFrame], schemas: dict[str, FrameSchema]
+    plan: QueryPlan,
+    frames: dict[str, pd.DataFrame],
+    schemas: dict[str, FrameSchema],
+    *,
+    trusted_columns: frozenset[str] = frozenset(),
 ) -> Union[QueryResult, PlanRejection]:
-    """Check the plan, then run it. A plan that fails the check never runs."""
+    """Check the plan, then run it. A plan that fails the check never runs.
+
+    A filter on a `trusted_columns` column skips the rule that a category
+    value must be one the column holds. That rule catches a model's typo.
+    A caller filtering on a value it already validated, like a promoted
+    metric scoping to a rep with no deals this quarter, wants zero rows
+    instead of a rejection.
+    """
     try:
-        schema = _check(plan, schemas)
+        schema = _check(plan, schemas, trusted_columns)
     except _Rejected as exc:
         return PlanRejection(exc.reason)
 
     try:
-        value, matched, code = _execute(plan, schema, frames[plan.frame])
+        value, rows, code = _execute(plan, schema, frames[plan.frame])
     except Exception as exc:  # noqa: BLE001 - a runtime failure is a refusal, not a crash
         return PlanRejection(f"the query failed while running: {type(exc).__name__}: {exc}", ran=True)
 
@@ -510,7 +530,8 @@ def run(
         value=value,
         row_count=row_count,
         truncated=truncated,
-        matched_rows=matched,
+        matched_rows=len(rows),
+        rows=rows[list(schema.columns)].reset_index(drop=True),
         code=code,
         description=_describe(plan, schema),
         result_label=_result_label(plan, schema),

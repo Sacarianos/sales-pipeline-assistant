@@ -241,3 +241,39 @@ def test_the_tool_schema_has_no_field_that_takes_code():
     schema = tool_schema(SCHEMAS)
     assert "expression" not in schema["properties"]
     assert schema["properties"]["frame"]["type"] == "string"
+
+
+def test_a_result_carries_the_matched_rows_without_withheld_columns():
+    outcome = _ok(
+        _plan(
+            frame="deals",
+            filters=[{"column": "stage", "op": "eq", "value": "Closed Won"}],
+            aggregate={"function": "count"},
+        )
+    )
+    assert len(outcome.rows) == outcome.matched_rows == 5
+    assert "region" not in outcome.rows.columns
+
+
+def test_a_trusted_column_accepts_a_value_it_does_not_hold_and_matches_nothing():
+    plan = _plan(
+        frame="deals",
+        filters=[{"column": "segment", "op": "eq", "value": "Public Sector"}],
+        aggregate={"function": "count"},
+    )
+    assert isinstance(run(plan, FRAMES, SCHEMAS), PlanRejection)
+
+    outcome = run(plan, FRAMES, SCHEMAS, trusted_columns=frozenset({"segment"}))
+    assert isinstance(outcome, QueryResult)
+    assert outcome.value == 0
+
+
+def test_a_trusted_column_still_needs_text():
+    plan = _plan(
+        frame="deals",
+        filters=[{"column": "segment", "op": "eq", "value": 3}],
+        aggregate={"function": "count"},
+    )
+    outcome = run(plan, FRAMES, SCHEMAS, trusted_columns=frozenset({"segment"}))
+    assert isinstance(outcome, PlanRejection)
+    assert "needs text" in outcome.reason

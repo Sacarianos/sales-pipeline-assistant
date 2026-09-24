@@ -80,7 +80,7 @@ class Declined:
     reason: str
 
 
-def _frames(data: Data) -> dict[str, pd.DataFrame]:
+def frames(data: Data) -> dict[str, pd.DataFrame]:
     """The frames the lane may name, bound to the same objects the metrics
     use. Named per snapshot, and a plan reads exactly one, since silently
     blending the two snapshots would reintroduce the exact error the
@@ -93,12 +93,12 @@ def _frames(data: Data) -> dict[str, pd.DataFrame]:
     }
 
 
-def _schemas(data: Data) -> dict[str, FrameSchema]:
-    return describe_frames(_frames(data), hidden_columns=HIDDEN_COLUMNS, labels=FRAME_LABELS)
+def schemas(data: Data) -> dict[str, FrameSchema]:
+    return describe_frames(frames(data), hidden_columns=HIDDEN_COLUMNS, labels=FRAME_LABELS)
 
 
 def _tool_schema(data: Data) -> dict:
-    return tool_schema(_schemas(data))
+    return tool_schema(schemas(data))
 
 
 def _describe_frame(schema: FrameSchema) -> str:
@@ -111,7 +111,7 @@ def _describe_frame(schema: FrameSchema) -> str:
 
 def _system_prompt(data: Data) -> str:
     """Everything the generator gets: frame schemas, never a data row."""
-    frames = "\n".join(_describe_frame(schema) for schema in _schemas(data).values())
+    frames = "\n".join(_describe_frame(schema) for schema in schemas(data).values())
     return (
         "You turn a sales leader's question into a query plan, recorded "
         f"through the {TOOL_NAME} tool. You never see any deal-level data, "
@@ -169,7 +169,7 @@ def _is_numeric_column(series: pd.Series) -> bool:
     return pd.api.types.is_numeric_dtype(series) and not pd.api.types.is_bool_dtype(series)
 
 
-def _facts(plan: QueryPlan, result: QueryResult) -> dict[str, Fact]:
+def facts_for(plan: QueryPlan, result: QueryResult) -> dict[str, Fact]:
     """Facts for whatever shape the plan returned.
 
     The count of rows the filters matched is always a fact, so the narrator
@@ -209,7 +209,7 @@ def _facts(plan: QueryPlan, result: QueryResult) -> dict[str, Fact]:
     return facts
 
 
-def _template(result: QueryResult, facts: dict[str, Fact]) -> str:
+def template_for(result: QueryResult, facts: dict[str, Fact]) -> str:
     if isinstance(result.value, pd.DataFrame):
         count = result.row_count
         note = f", showing the first {ROW_CAP}" if result.truncated else ""
@@ -219,7 +219,7 @@ def _template(result: QueryResult, facts: dict[str, Fact]) -> str:
     return "No rows matched this query, so there is nothing to compute."
 
 
-def _display(value: object) -> pd.DataFrame:
+def display_table(value: object) -> pd.DataFrame:
     if isinstance(value, pd.DataFrame):
         return value.reset_index(drop=True)
     return pd.DataFrame([{"result": value}])
@@ -259,15 +259,15 @@ def attempt(
         record("declined", reason=plan.decline_reason)
         return Declined(plan.decline_reason)
 
-    outcome = run(plan, _frames(data), _schemas(data))
+    outcome = run(plan, frames(data), schemas(data))
     if isinstance(outcome, PlanRejection):
         record("failed" if outcome.ran else "rejected", plan=raw, reason=outcome.reason)
         verb = "failed" if outcome.ran else "was rejected"
         return Declined(f"the query written for it {verb}: {outcome.reason}")
     record("answered", plan=raw, matched_rows=outcome.matched_rows, row_count=outcome.row_count)
 
-    facts = _facts(plan, outcome)
-    table = _display(outcome.value)
+    facts = facts_for(plan, outcome)
+    table = display_table(outcome.value)
     filters = {
         "frame read": plan.frame,
         "rows matched": f"{outcome.matched_rows}",
@@ -287,7 +287,7 @@ def attempt(
     # question, a restatement, and the facts just derived, and its prose is
     # verified against those facts before publishing.
     restated = f"Reading this as an exploratory query: {outcome.description}"
-    narration = narrate(question, restated, facts, _template(outcome, facts), client)
+    narration = narrate(question, restated, facts, template_for(outcome, facts), client)
 
     return Answered(
         lane="exploratory",
@@ -309,4 +309,4 @@ def attempt(
     )
 
 
-__all__ = ["Declined", "attempt"]
+__all__ = ["Declined", "attempt", "display_table", "facts_for", "frames", "schemas", "template_for"]

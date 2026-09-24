@@ -3,7 +3,7 @@ short-circuits ahead of it.
 
 Per the parent spec's testing decisions, most of this goes in through the
 primary seam - `ask(question, data, client)` - and asserts on what reaches
-the screen. `_frames` and the generator's schema prompt are checked directly
+the screen. `frames` and the generator's schema prompt are checked directly
 in a few places, the same way the parent spec treats the query plan checker
 as a deliberate second seam. The frame boundary, the hidden region columns,
 and the no-data-row guarantee are what this lane exists to hold, so they're
@@ -222,7 +222,7 @@ def test_low_cardinality_columns_are_listed_but_identifiers_and_dates_are_not(da
 
 
 def test_the_lane_exposes_per_snapshot_frames_and_no_combined_frame(data):
-    frames = fallback._frames(data)
+    frames = fallback.frames(data)
     assert set(frames) == {"deals_q1", "deals_q2", "quotas", "reps"}
     assert frames["deals_q1"] is data.deals("Q1")
     assert frames["deals_q2"] is data.deals("Q2")

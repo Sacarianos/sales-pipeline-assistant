@@ -51,6 +51,12 @@ covers an outright API failure or timeout. There is always something correct
 to show; the worst case is a boring sentence, never an empty screen or an
 invented number.
 
+An identifier like a deal ID `OPP-079` or a period `Q2-2026` is checked as
+one token instead: it has to appear in a fact's label or in the restatement,
+so the narrator can name a deal it was given and can't name one it wasn't.
+[ADR-0008](docs/adr/0008-verifier-checks-identifiers-as-whole-tokens.md) has
+the reasoning.
+
 That fallback is not a rare edge case reserved for outages. During
 implementation, a live run of "which reps are at risk of missing Q2" had the
 narrator write "best-case coverage above 100%", a true statement, but 100 is
@@ -229,6 +235,26 @@ Tests go in through the same seam a user does (`ask(question, data, client)`)
 and assert on what reaches the screen, using a stub client shaped like
 `anthropic.Anthropic` rather than a live API key, so the suite is
 deterministic and free to run.
+
+## Evals
+
+The tests prove the code does what it says with a scripted model. They can't
+prove the real models read questions correctly, and a misread question is
+the one failure the verifier can't catch, since it still produces a real
+number. The evals run 30 questions through `ask` with the real client:
+
+```bash
+python -m evals.run --repeat 3
+```
+
+Metric questions are scored on the router's reading. Exploratory questions
+are scored on their figures against a pandas reference, so two different
+plans that compute the same thing both pass. Refusals are scored on nothing
+being answered, and for region, on no model being asked at all. Each run
+saves its results under `evals/results/` and lists every case whose pass
+rate changed since the last one. When the narrator's prose is blocked, the
+report shows the draft and the figures that failed, which is how the first
+runs found the problems ADR-0008 and the eval regression tests fix.
 
 ## Adding a metric: a worked example
 

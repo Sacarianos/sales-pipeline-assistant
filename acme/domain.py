@@ -64,7 +64,14 @@ class Intent(BaseModel):
     """
 
     metric: str = Field(description="Metric name from the catalog, or 'unsupported'.")
-    grouping: str = Field(default="overall", description="overall, segment, rep, or manager.")
+    grouping: str = Field(
+        default="overall",
+        description=(
+            "The scope the question asks about: 'overall', or one named segment, "
+            "rep, or manager, with that name set in its own field. A question "
+            "about every rep, like 'which reps are at risk', is 'overall'."
+        ),
+    )
     period: str = Field(description="Period key such as Q2-2026.")
     comparison_period: str | None = Field(default=None)
     segment: str | None = Field(default=None)
@@ -72,6 +79,12 @@ class Intent(BaseModel):
     manager: str | None = Field(default=None)
     restated: str = Field(description="One sentence restating how the question was read.")
     unsupported_reason: str | None = Field(default=None)
+    # Why the metric is 'unsupported'. 'no_metric' means the data might answer
+    # it but no registered metric does, so the exploratory lane may try.
+    # 'ambiguous' means the question could mean more than one thing, so
+    # nothing tries: guessing which is exactly the silent substitution this
+    # system refuses.
+    unsupported_kind: Literal["no_metric", "ambiguous"] | None = Field(default=None)
 
     def is_unsupported(self) -> bool:
         return self.metric == UNSUPPORTED
@@ -146,6 +159,10 @@ class Answered:
     # than because narration was never attempted (no client). Drives the
     # "blocked" badge, distinct from having no badge at all.
     narrator_blocked: bool = False
+    # When verification blocked the narrator, its draft and the figures in it
+    # that matched no fact. For diagnosis and evals, never drawn on screen.
+    blocked_draft: str = ""
+    unmatched_figures: tuple[str, ...] = ()
     facts: dict[str, Fact] = field(default_factory=dict)
     flags: tuple[Flag, ...] = ()
     table: pd.DataFrame = field(default_factory=pd.DataFrame)

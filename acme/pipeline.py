@@ -47,7 +47,7 @@ def ask(
     # a topic refused ahead of routing (region), reaches the fallback lane
     # at all.
     declined = None
-    if intent.is_unsupported() and not routing.refused_topic:
+    if intent.is_unsupported() and not routing.refused_topic and intent.unsupported_kind != "ambiguous":
         exploratory = fallback.attempt(question, data, client, router_mode=routing.mode, log=log)
         if isinstance(exploratory, Answered):
             return exploratory
@@ -85,6 +85,8 @@ def ask(
         prose_source=narration.source,
         verified_figures=narration.verified_figures,
         narrator_blocked=narration.blocked,
+        blocked_draft=narration.draft,
+        unmatched_figures=narration.unmatched,
         facts=result.facts,
         flags=flags,
         table=result.table,

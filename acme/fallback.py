@@ -123,6 +123,10 @@ def _system_prompt(data: Data) -> str:
         "snapshots of the same deals and are never combined. If the question "
         "doesn't name a quarter, read deals_q2, the current snapshot.\n"
         "- Filter a category column only with one of the values listed for it.\n"
+        "- A snapshot is not a quarter. deals_q2 holds deals closing in more "
+        "than one quarter, so when a question is about a quarter, like 'this "
+        "quarter' or 'in Q1', filter period to it. Without a quarter, like "
+        "'right now', read the whole snapshot.\n"
         "- Prefer the 'period' column over comparing close_date. When you do "
         "filter a date, write it YYYY-MM-DD.\n"
         "- To answer with numbers, set an aggregate, optionally grouped. To "
@@ -131,6 +135,9 @@ def _system_prompt(data: Data) -> str:
         "- If the question needs a column that isn't listed above, set "
         "decline_reason and leave every other field out. Decline rather "
         "than substitute the nearest-looking column.\n"
+        "- If a name in the question matches more than one listed value, like "
+        "a first name shared by a rep and a manager, set decline_reason and "
+        "name every match. Never pick one.\n"
         + "".join(
             f"- Questions about {' or '.join((topic.label, *topic.aliases))} are "
             "refused on purpose, because the data holds two definitions of it "
@@ -308,6 +315,8 @@ def attempt(
         prose_source=narration.source,
         verified_figures=narration.verified_figures,
         narrator_blocked=narration.blocked,
+        blocked_draft=narration.draft,
+        unmatched_figures=narration.unmatched,
         facts=facts,
         flags=flags,
         table=table,

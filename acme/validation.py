@@ -101,6 +101,11 @@ def validate(intent: Intent, catalog: Catalog, data: Data) -> ValidationError | 
         return ValidationError(
             f"'{intent.metric}' does not answer at the '{intent.grouping}' grouping"
         )
+    if intent.grouping in ("segment", "rep", "manager") and not getattr(intent, intent.grouping):
+        return ValidationError(
+            f"grouping '{intent.grouping}' needs a named {intent.grouping}. A question "
+            f"about every {intent.grouping} reads as overall"
+        )
 
     if intent.metric == "risk" and not is_in_progress(intent.period, data.as_of):
         return ValidationError(

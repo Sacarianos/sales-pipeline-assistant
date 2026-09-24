@@ -20,14 +20,37 @@ Append-only and local. No question text leaves the machine.
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
-- [ ] Every fallback attempt appends exactly one record
-- [ ] A record carries the question, the plan, validation outcome,
+- [x] Every fallback attempt appends exactly one record
+- [x] A record carries the question, the plan, validation outcome,
       execution outcome, and row count
-- [ ] A generator decline is logged with its reason and no plan
-- [ ] A validation rejection is logged with the plan that was rejected and the reason
-- [ ] Metric-lane answers append nothing
-- [ ] The log is append-only and never rewritten in place
-- [ ] The log survives a restart
-- [ ] No question text is sent anywhere off the machine
+- [x] A generator decline is logged with its reason and no plan
+- [x] A validation rejection is logged with the plan that was rejected and the reason
+- [x] Metric-lane answers append nothing
+- [x] The log is append-only and never rewritten in place
+- [x] The log survives a restart
+- [x] No question text is sent anywhere off the machine
+
+## Notes
+
+Built in `acme/query_log.py`: one JSON object per line in
+`logs/query_log.jsonl`, which git ignores because it holds the questions
+people asked. `ask` takes the log as an optional argument and hands it to the
+fallback lane, and the app passes one cached instance. Tests point it at a
+temporary file.
+
+Validation and execution outcomes fold into one `outcome` field, since
+they're never independent. `answered` means the plan ran. `declined` means
+the generator said the frames can't answer it. `rejected` means the plan was
+malformed or failed the checker, so nothing ran. `failed` means it passed the
+checker and raised while running. `unavailable` means the generator call
+itself failed, which the spec didn't cover but is still an attempt.
+
+The plan is stored exactly as the generator wrote it, before parsing, so a
+malformed plan is on record too. No client means no attempt, so nothing is
+logged in offline mode.
+
+Checked end to end in the running app with a scripted client: an answered,
+a rejected, and a declined question each appended one line with the right
+outcome. 202 passing.

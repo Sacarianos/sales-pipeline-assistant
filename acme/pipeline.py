@@ -14,13 +14,20 @@ from .catalog import Catalog, build_catalog
 from .domain import Answer, Answered, Refused
 from .flags import evaluate as evaluate_flags
 from .loading import Data
+from .query_log import QueryLog
 from .narrator import narrate
 from .registry import MetricRequest
 from .router import route
 from .validation import validate
 
 
-def ask(question: str, data: Data, client: object | None = None) -> Answer:
+def ask(
+    question: str,
+    data: Data,
+    client: object | None = None,
+    *,
+    log: QueryLog | None = None,
+) -> Answer:
     catalog = build_catalog(data)
     routing = route(question, catalog, client)
     intent = routing.intent
@@ -33,7 +40,7 @@ def ask(question: str, data: Data, client: object | None = None) -> Answer:
     # at all.
     declined = None
     if intent.is_unsupported() and not routing.refused_topic:
-        exploratory = fallback.attempt(question, data, client, router_mode=routing.mode)
+        exploratory = fallback.attempt(question, data, client, router_mode=routing.mode, log=log)
         if isinstance(exploratory, Answered):
             return exploratory
         declined = exploratory

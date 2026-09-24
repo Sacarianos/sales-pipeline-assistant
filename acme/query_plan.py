@@ -180,6 +180,9 @@ class QueryResult:
 @dataclass(frozen=True)
 class PlanRejection:
     reason: str
+    # True when the plan passed the checker and failed while running, False
+    # when the checker stopped it before anything ran.
+    ran: bool = False
 
 
 class _Rejected(Exception):
@@ -495,7 +498,7 @@ def run(
     try:
         value, matched, code = _execute(plan, schema, frames[plan.frame])
     except Exception as exc:  # noqa: BLE001 - a runtime failure is a refusal, not a crash
-        return PlanRejection(f"the query failed while running: {type(exc).__name__}: {exc}")
+        return PlanRejection(f"the query failed while running: {type(exc).__name__}: {exc}", ran=True)
 
     row_count, truncated = None, False
     if isinstance(value, pd.DataFrame):

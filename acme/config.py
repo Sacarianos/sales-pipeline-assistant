@@ -39,6 +39,10 @@ SNAPSHOT_DIRS = {
     "Q2": DATA_DIR / "Q2" / "deals.csv",
 }
 
+# Every exploratory attempt appends a line here. Local only, and ignored by
+# git, since it holds the questions people asked.
+QUERY_LOG_PATH = REPO_ROOT / "logs" / "query_log.jsonl"
+
 # Model IDs live here even though issue 01 calls neither of them.
 ROUTER_MODEL = "claude-sonnet-5"
 NARRATOR_MODEL = "claude-haiku-4-5-20251001"

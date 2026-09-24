@@ -31,6 +31,7 @@ from .flags import evaluate_for_snapshot
 from .loading import Data
 from .narrator import narrate
 from .periods import period_for_snapshot
+from .query_log import LogRecord, Outcome, QueryLog
 from .query_plan import (
     ROW_CAP,
     FrameSchema,
@@ -230,24 +231,40 @@ def attempt(
     client: object | None,
     *,
     router_mode: str = "online",
+    log: QueryLog | None = None,
 ) -> Answered | Declined | None:
-    """Try to answer `question` from the fallback lane."""
+    """Try to answer `question` from the fallback lane.
+
+    Every attempt appends exactly one record to `log` when one is given. No
+    client means no attempt, so nothing is logged then.
+    """
     if client is None:
         return None
 
+    def record(outcome: Outcome, **fields) -> None:
+        if log is not None:
+            log.append(LogRecord(question=question, outcome=outcome, **fields))
+
     raw = _generate(question, data, client)
     if raw is None:
+        record("unavailable", reason="the generator call failed")
         return None
     try:
         plan = QueryPlan(**raw)
     except ValidationError as exc:
-        return Declined(f"the query written for it didn't match the plan format: {exc.errors()[0]['msg']}")
+        reason = f"the query written for it didn't match the plan format: {exc.errors()[0]['msg']}"
+        record("rejected", plan=raw, reason=reason)
+        return Declined(reason)
     if plan.decline_reason:
+        record("declined", reason=plan.decline_reason)
         return Declined(plan.decline_reason)
 
     outcome = run(plan, _frames(data), _schemas(data))
     if isinstance(outcome, PlanRejection):
-        return Declined(f"the query written for it was rejected: {outcome.reason}")
+        record("failed" if outcome.ran else "rejected", plan=raw, reason=outcome.reason)
+        verb = "failed" if outcome.ran else "was rejected"
+        return Declined(f"the query written for it {verb}: {outcome.reason}")
+    record("answered", plan=raw, matched_rows=outcome.matched_rows, row_count=outcome.row_count)
 
     facts = _facts(plan, outcome)
     table = _display(outcome.value)

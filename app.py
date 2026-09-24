@@ -30,6 +30,7 @@ from acme import config
 from acme.catalog import build_catalog
 from acme.charts import chart_for
 from acme.domain import Answer, Answered, Flag, Refused
+from acme.query_log import QueryLog
 from acme.loading import load_data
 from acme.pipeline import ask
 
@@ -366,10 +367,16 @@ def get_client() -> anthropic.Anthropic | None:
         return None
 
 
+@st.cache_resource
+def get_query_log() -> QueryLog:
+    return QueryLog(config.QUERY_LOG_PATH)
+
+
 st.markdown(STYLE, unsafe_allow_html=True)
 
 data = get_data()
 client = get_client()
+query_log = get_query_log()
 catalog = build_catalog(data)
 
 if "history" not in st.session_state:
@@ -429,7 +436,7 @@ with chat_col:
         with transcript:
             with st.chat_message("user"):
                 st.write(question)
-            answer = ask(question, data, client)
+            answer = ask(question, data, client, log=query_log)
             with st.chat_message("assistant"):
                 # Streamed only here, for the answer this run just computed.
                 # Every later rerun draws it from `history` above, instantly.

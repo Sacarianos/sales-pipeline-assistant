@@ -248,8 +248,9 @@ those caveats are properties of the data rather than of the lane.
 ### Query log
 
 Every fallback attempt appends a record: the question, the generated
-plan, whether validation passed, whether execution succeeded, and the
-row count. This is what V3's promote-to-metric path reads, and it is the
+plan, an outcome saying whether it was answered, declined, rejected before
+running, failed while running, or never reached the generator, and the row
+counts. This is what V3's promote-to-metric path reads, and it is the
 cheapest possible thing that makes V3 possible, so it ships now rather than
 being retrofitted onto a lane that has already been answering questions.
 

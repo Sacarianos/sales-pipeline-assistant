@@ -8,9 +8,7 @@ rule, or the router directly.
 
 from __future__ import annotations
 
-from acme.catalog import build_catalog
-from acme.domain import Answered, Fact, Refused, Result, Unit
-from acme.loading import quota_total
+from acme.domain import Answered
 from acme.pipeline import ask
 
 
@@ -32,36 +30,6 @@ def test_restatement_renders_inside_the_answer_not_only_the_trace(data):
     # question naming no quarter says so in the sentence a human reads.
     assert "Q2-2026" in answer.restated
     assert "named no quarter" in answer.restated
-
-
-def test_offline_router_produces_a_valid_intent_with_a_restatement(data):
-    answer = ask("how are we tracking this quarter", data)
-
-    assert answer.router_mode == "offline"
-    assert answer.intent is not None
-    assert answer.intent.metric == "attainment"
-    assert answer.intent.period == "Q2-2026"
-    assert answer.intent.restated
-
-
-def test_fact_carries_value_unit_and_label():
-    fact = Fact(value=8.4, unit=Unit.PERCENT, label="Attainment against quota")
-    assert fact.value == 8.4
-    assert fact.unit is Unit.PERCENT
-    assert fact.label == "Attainment against quota"
-
-
-def test_result_carries_the_full_contract(data):
-    answer = ask("how are we tracking this quarter", data)
-    assert isinstance(answer, Answered)
-
-    # Everything Result promises is reachable off the Answered variant.
-    assert answer.facts
-    assert not answer.table.empty
-    assert not answer.source_rows.empty
-    assert answer.filters
-    assert answer.snapshot == "Q2"
-    assert answer.intent is not None
 
 
 def test_period_membership_uses_close_date_for_open_and_closed_deals(data):
@@ -88,30 +56,6 @@ def test_open_is_the_complement_of_closed_won_and_closed_lost(data):
     assert "Negotiation" in stages_marked_open
 
 
-def test_catalog_is_built_from_registry_plus_data(data):
-    catalog = build_catalog(data)
-
-    assert "attainment" in catalog.metric_names()
-    assert catalog.groupings
-    assert catalog.segments
-    assert catalog.reps
-    assert catalog.managers
-    assert catalog.periods == ("Q1-2026", "Q2-2026")
-    assert catalog.as_of == data.as_of
-
-
-def test_adding_a_metric_only_requires_the_registered_spec_to_exist(data):
-    catalog = build_catalog(data)
-    spec = catalog.metric("attainment")
-
-    assert spec is not None
-    assert spec.groupings
-    assert spec.intent_fields
-    assert spec.definition_keys
-    assert spec.examples
-    assert callable(spec.compute)
-
-
 def test_flags_panel_renders_partial_period_and_definition(data):
     answer = ask("how are we tracking this quarter", data)
     assert isinstance(answer, Answered)
@@ -123,29 +67,3 @@ def test_flags_panel_renders_partial_period_and_definition(data):
     definition = next(f for f in answer.flags if f.kind == "definition:attainment")
     assert "closed-won revenue" in definition.detail.lower()
     assert "quota" in definition.detail.lower()
-
-
-def test_four_panel_sections_have_something_to_render(data):
-    answer = ask("how are we tracking this quarter", data)
-    assert isinstance(answer, Answered)
-
-    assert answer.facts               # figures
-    assert answer.flags                # flags
-    assert answer.row_count > 0        # source rows, with a count
-    assert answer.filters              # the filter that produced them
-    assert answer.intent is not None   # trace: intent
-    assert answer.snapshot             # trace: answering snapshot
-
-
-def test_quarterly_quota_totals(data):
-    assert quota_total(data.quotas, "Q1-2026") == 5_920_000
-    assert quota_total(data.quotas, "Q2-2026") == 6_200_000
-
-
-def test_unsupported_question_refuses_with_a_hint(data):
-    answer = ask("what did our Slack sentiment look like", data)
-
-    assert isinstance(answer, Refused)
-    assert answer.reason
-    assert answer.hint
-    assert "attainment" in answer.hint

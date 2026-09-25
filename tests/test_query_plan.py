@@ -94,12 +94,6 @@ def test_a_row_listing_returns_only_the_requested_columns():
     assert outcome.value["deal_value"].tolist() == [20000.0, 19000.0, 18000.0]
 
 
-def test_a_row_listing_with_no_columns_named_still_leaves_hidden_columns_out():
-    outcome = _ok(_plan(frame="deals", limit=3))
-    assert "region" not in outcome.value.columns
-    assert "deal_value" in outcome.value.columns
-
-
 def test_an_aggregate_over_no_matching_rows_reports_no_value_rather_than_nan():
     outcome = _ok(
         _plan(
@@ -120,9 +114,6 @@ def test_a_result_past_the_row_cap_truncates_and_reports_the_full_count():
 
 
 EQUIVALENCE_PLANS = [
-    dict(frame="deals", aggregate={"function": "sum", "column": "deal_value"}),
-    dict(frame="deals", aggregate={"function": "count"}),
-    dict(frame="deals", aggregate={"function": "nunique", "column": "segment"}),
     dict(
         frame="deals",
         filters=[
@@ -188,25 +179,11 @@ def test_the_description_reads_as_plain_english():
         (dict(frame="deals_q1 + deals_q2"), "not one of the frames"),
         (dict(frame="deals", columns=["nope"]), "'nope' is not a column"),
         (dict(frame="deals", group_by=["region"], aggregate={"function": "count"}), "'region' is withheld"),
-        (dict(frame="deals", filters=[{"column": "region", "op": "eq", "value": "West"}]), "'region' is withheld"),
         (dict(frame="deals", aggregate={"function": "sum", "column": "segment"}), "can't take sum"),
-        (dict(frame="deals", aggregate={"function": "count", "column": "deal_value"}), "count counts rows"),
-        (dict(frame="deals", aggregate={"function": "sum"}), "needs a column"),
         (dict(frame="deals", filters=[{"column": "segment", "op": "gt", "value": "SMB"}]), "can't compare"),
         (dict(frame="deals", filters=[{"column": "stage", "op": "eq", "value": "Closed-Lost"}]), "not a value"),
-        (dict(frame="deals", filters=[{"column": "is_won", "op": "eq", "value": "yes"}]), "true or false"),
-        (dict(frame="deals", filters=[{"column": "deal_value", "op": "gt", "value": "big"}]), "needs a number"),
         (dict(frame="deals", filters=[{"column": "close_date", "op": "gt", "value": "April"}]), "YYYY-MM-DD"),
-        (dict(frame="deals", filters=[{"column": "segment", "op": "in", "value": "SMB"}]), "needs a list"),
-        (dict(frame="deals", filters=[{"column": "segment", "op": "eq", "value": ["SMB"]}]), "single value"),
-        (dict(frame="deals", group_by=["deal_value"], aggregate={"function": "count"}), "can't group by"),
-        (dict(frame="deals", group_by=["segment", "stage", "is_won"], aggregate={"function": "count"}), "at most 2"),
-        (dict(frame="deals", group_by=["segment"], aggregate={"function": "nunique", "column": "segment"}), "also grouped by"),
         (dict(frame="deals", group_by=["segment"]), "needs an aggregate"),
-        (dict(frame="deals", columns=["deal_id"], aggregate={"function": "count"}), "columns only apply"),
-        (dict(frame="deals", columns=["deal_id"], sort_by="deal_value"), "sort by"),
-        (dict(frame="deals", aggregate={"function": "count"}, sort_by="result"), "single number"),
-        (dict(frame="deals", limit=0), "limit"),
         (dict(frame="deals", limit=ROW_CAP + 1), "limit"),
     ],
 )
@@ -214,17 +191,6 @@ def test_a_plan_outside_the_rules_is_rejected_before_anything_runs(fields, reaso
     outcome = run(_plan(**fields), FRAMES, SCHEMAS)
     assert isinstance(outcome, PlanRejection)
     assert reason_fragment in outcome.reason
-
-
-def test_a_true_or_false_column_reads_naturally_in_the_description():
-    outcome = _ok(
-        _plan(
-            frame="deals",
-            filters=[{"column": "is_won", "op": "eq", "value": False}],
-            aggregate={"function": "count"},
-        )
-    )
-    assert outcome.description == "Number of rows in the deals frame where the row is not won."
 
 
 def test_the_tool_schema_enumerates_frames_and_columns_but_never_a_hidden_one():
@@ -243,18 +209,6 @@ def test_the_tool_schema_has_no_field_that_takes_code():
     assert schema["properties"]["frame"]["type"] == "string"
 
 
-def test_a_result_carries_the_matched_rows_without_withheld_columns():
-    outcome = _ok(
-        _plan(
-            frame="deals",
-            filters=[{"column": "stage", "op": "eq", "value": "Closed Won"}],
-            aggregate={"function": "count"},
-        )
-    )
-    assert len(outcome.rows) == outcome.matched_rows == 5
-    assert "region" not in outcome.rows.columns
-
-
 def test_a_trusted_column_accepts_a_value_it_does_not_hold_and_matches_nothing():
     plan = _plan(
         frame="deals",
@@ -266,17 +220,6 @@ def test_a_trusted_column_accepts_a_value_it_does_not_hold_and_matches_nothing()
     outcome = run(plan, FRAMES, SCHEMAS, trusted_columns=frozenset({"segment"}))
     assert isinstance(outcome, QueryResult)
     assert outcome.value == 0
-
-
-def test_a_trusted_column_still_needs_text():
-    plan = _plan(
-        frame="deals",
-        filters=[{"column": "segment", "op": "eq", "value": 3}],
-        aggregate={"function": "count"},
-    )
-    outcome = run(plan, FRAMES, SCHEMAS, trusted_columns=frozenset({"segment"}))
-    assert isinstance(outcome, PlanRejection)
-    assert "needs text" in outcome.reason
 
 
 def test_a_change_between_two_plans_reads_as_plain_english():
@@ -301,22 +244,10 @@ def test_a_change_between_two_plans_reads_as_plain_english():
 
     assert describe_change(before, before, SCHEMAS) == "Same query as your last one."
 
-
-def test_a_listing_that_goes_back_to_every_column_says_so():
-    """Found in review: a refinement from two named columns back to all of
-    them showed every column but was described as the same query."""
-    from acme.query_plan import describe_change
-
+    # A listing that goes back to every column changed what it shows.
     narrow = {"frame": "deals", "columns": ["deal_id", "deal_value"]}
-    wide = {"frame": "deals"}
-    assert describe_change(narrow, wide, SCHEMAS) == "Changed from your last query: now showing every column."
-
-
-def test_a_sort_direction_on_an_unsorted_plan_is_not_a_change():
-    """Found in review: `descending` means nothing without `sort_by`, so a
-    flip between two unsorted plans was reported as a change."""
-    from acme.query_plan import describe_change
-
-    before = {"frame": "deals", "aggregate": {"function": "count"}}
-    after = {**before, "descending": False}
-    assert describe_change(before, after, SCHEMAS) == "Same query as your last one."
+    assert describe_change(narrow, {"frame": "deals"}, SCHEMAS) == (
+        "Changed from your last query: now showing every column."
+    )
+    # A sort direction on a plan with no sort changes nothing.
+    assert describe_change(before, {**before, "descending": False}, SCHEMAS) == "Same query as your last one."

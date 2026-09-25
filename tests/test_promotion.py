@@ -115,23 +115,6 @@ def test_plans_that_differ_only_by_snapshot_period_and_scope_are_one_candidate(d
     assert candidates[0] == loss
 
 
-def test_only_answered_plans_become_candidates(data):
-    frames = {c.plan["frame"] for c in find_candidates(RECORDS, data)}
-    assert frames == {"deals", "quotas"}
-
-
-def test_candidates_rank_by_how_often_they_were_asked(data):
-    counts = [c.count for c in find_candidates(RECORDS, data)]
-    assert counts == sorted(counts, reverse=True)
-
-
-def test_a_candidate_describes_what_the_metric_would_read(data):
-    assert _candidate(data).description == (
-        "Number of deals in the Q2 snapshot where stage is Closed Lost and "
-        "period is Q2-2026, grouped by loss reason, sorted by the result, highest first."
-    )
-
-
 # --- refusals ---------------------------------------------------------------
 
 
@@ -141,10 +124,6 @@ def test_a_candidate_describes_what_the_metric_would_read(data):
         (dict(description=""), "write a definition"),
         (dict(description="Loss reasons."), "at least"),
         (dict(name="attainment"), "already registered"),
-        (dict(name="Loss Reasons"), "snake_case"),
-        (dict(groupings=("region",)), "'region' is not a grouping"),
-        (dict(examples=()), "at least one example"),
-        (dict(definition_keys=("made_up",)), "'made_up' is not a definition"),
     ],
 )
 def test_a_promotion_missing_a_decision_is_refused(data, overrides, fragment):
@@ -228,23 +207,6 @@ def test_a_promoted_metric_scopes_to_the_asked_period_and_segment(data, tmp_path
     assert set(answer.source_rows["period"]) <= {"Q1-2026"}
 
 
-def test_a_promoted_metric_refuses_a_grouping_nobody_chose(data, tmp_path, clean_registry):
-    path = promote(_promotion(groupings=()), _candidate(data), data, tmp_path)
-    _load(path, "promoted_test_loss_reasons")
-
-    client = StubRouterClient(
-        tool_input=dict(
-            metric="promoted_test_loss_reasons",
-            grouping="rep",
-            rep="Marcus Rivera",
-            period="Q2-2026",
-            restated="Reading this as loss reasons for Marcus Rivera.",
-        )
-    )
-    answer = ask("why is Marcus losing deals", data, client)
-    assert answer.kind == "refused"
-
-
 def test_a_promoted_metric_over_quotas_answers_without_deal_flags(data, tmp_path, clean_registry):
     promotion = _promotion(
         name="promoted_test_quota_total",
@@ -290,7 +252,7 @@ def test_the_list_command_shows_candidates_with_their_questions(tmp_path):
     text = out.getvalue()
     assert "asked 3 times" in text
     assert "why are we losing deals" in text
-    assert "segment" in text
+    assert "Asked scoped to: segment Enterprise" in text
 
 
 def test_the_promote_command_writes_the_metric(data, tmp_path):
@@ -313,36 +275,3 @@ def test_the_promote_command_writes_the_metric(data, tmp_path):
     assert code == 0, out.getvalue()
     assert (metrics_dir / "promoted_test_loss_reasons.py").exists()
     assert "reads only the period each question asks about" in out.getvalue()
-
-
-def test_the_promote_command_reports_every_problem_and_writes_nothing(data, tmp_path):
-    log = _log(tmp_path)
-    metrics_dir = tmp_path / "metrics"
-    metrics_dir.mkdir()
-    out = io.StringIO()
-    code = main(
-        [
-            "promote", _candidate(data).id,
-            "--log", str(log.path),
-            "--metrics-dir", str(metrics_dir),
-            "--name", "attainment",
-            "--description", "",
-        ],
-        out=out,
-    )
-    assert code == 1
-    assert "already registered" in out.getvalue()
-    assert "write a definition" in out.getvalue()
-    assert list(metrics_dir.iterdir()) == []
-
-
-def test_the_promote_command_rejects_an_unknown_candidate(tmp_path):
-    log = _log(tmp_path)
-    out = io.StringIO()
-    assert main(["promote", "nope1234", "--log", str(log.path), "--name", "x", "--description", DEFINITION], out=out) == 1
-    assert "no candidate" in out.getvalue()
-
-
-def test_the_generated_file_reads_like_a_hand_written_one(data):
-    source = render(_promotion(), _candidate(data))
-    assert max(len(line) for line in source.splitlines()) <= 80

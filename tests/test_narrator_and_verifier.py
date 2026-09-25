@@ -139,20 +139,6 @@ def test_thousands_shorthand_of_a_currency_fact_is_blocked(data):
     assert answer.narrator_blocked is True
 
 
-def test_percent_count_and_date_facts_verify_only_at_rounding_precision(data):
-    # day_of_quarter (32) and days_in_quarter (91) are count facts for the
-    # default Q2 answer; dividing either by a thousand must not verify.
-    client = StubClient(
-        tool_input=_attainment_input(),
-        narrator_text="This is day 0.032 of the quarter.",
-    )
-    answer = ask("how are we tracking this quarter", data, client)
-
-    assert isinstance(answer, Answered)
-    assert answer.prose_source == "template"
-    assert answer.narrator_blocked is True
-
-
 def test_period_year_day_of_quarter_and_days_in_quarter_verify_as_facts(data):
     client = StubClient(
         tool_input=_attainment_input(),

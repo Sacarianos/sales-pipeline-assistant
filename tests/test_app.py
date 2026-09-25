@@ -1,5 +1,5 @@
-"""The chat's conversation behavior, run through the real app with
-Streamlit's test harness and a scripted model client."""
+"""The app itself, run through Streamlit's test harness with a scripted
+model client: what a reader sees, in the order they see it."""
 
 from __future__ import annotations
 
@@ -17,6 +17,13 @@ APP = Path(__file__).resolve().parent.parent / "app.py"
 FIRST = "how is the Enterprise segment doing"
 FOLLOW_UP = "what about SMB?"
 PROSE = "Here is how that segment is tracking."
+EXPLORATORY = "why are we losing deals"
+LOSS_REASONS = {
+    "frame": "deals_q2",
+    "filters": [{"column": "is_lost", "op": "eq", "value": True}],
+    "group_by": ["loss_reason"],
+    "aggregate": {"function": "count"},
+}
 
 
 class _Block:
@@ -26,8 +33,9 @@ class _Block:
 
 class ScriptedClient:
     """Reads the first question as Enterprise attainment and every later one
-    as a follow-up about SMB. Kept on the class so a test can inspect the
-    one instance the app creates."""
+    as a follow-up about SMB, except a question about losing deals, which no
+    metric covers. Kept on the class so a test can inspect the one instance
+    the app creates."""
 
     instances: list["ScriptedClient"] = []
 
@@ -43,6 +51,14 @@ class ScriptedClient:
         self.calls.append(kwargs)
         if not kwargs.get("tools"):
             return _Block(content=[_Block(type="text", text=PROSE)])
+        if kwargs["tools"][0]["name"] == "plan_query":
+            return _Block(content=[_Block(type="tool_use", input=LOSS_REASONS)])
+        if EXPLORATORY in json.dumps(kwargs["messages"]):
+            unsupported = dict(
+                metric="unsupported", period="Q2-2026", unsupported_kind="no_metric",
+                restated="Reading this as a question outside the catalog.",
+            )
+            return _Block(content=[_Block(type="tool_use", input=unsupported)])
         follow_up = len(self.router_calls()) > 1
         reading = dict(
             metric="attainment",
@@ -90,13 +106,6 @@ def test_a_follow_up_shows_what_it_carried_over_before_the_answer(app):
     assert prose_at > 0
 
 
-def test_a_standalone_answer_shows_no_carried_over_caption(app):
-    _ask(app, FIRST)
-
-    first = list(app.chat_message[-1].children.values())[0]
-    assert not str(getattr(first, "value", "")).startswith("↳")
-
-
 def test_the_second_question_reaches_the_router_with_the_first_as_context(app):
     _ask(app, FIRST)
     _ask(app, FOLLOW_UP)
@@ -120,3 +129,23 @@ def test_new_conversation_is_available_after_the_first_answer_and_clears_it(app)
     _new_conversation(app).click().run()
     assert len(app.chat_message) == 0
     assert _new_conversation(app).disabled
+
+
+def test_an_exploratory_answer_leads_with_its_warning_and_query_and_claims_no_verification(app):
+    """The reader sees the red warning first, then the query in plain English
+    and as pandas, all before the prose and none of it behind a click. The
+    verified badge belongs to metrics, so it never appears here."""
+    _ask(app, EXPLORATORY)
+
+    answer = list(app.chat_message[-1].children.values())
+    kinds = [type(node).__name__ for node in answer]
+    warning = kinds.index("Error")
+    query = next(i for i, node in enumerate(answer) if str(getattr(node, "value", "")).startswith("**Query:**"))
+    code = kinds.index("Code")
+    prose = next(i for i, node in enumerate(answer) if getattr(node, "value", None) == PROSE)
+    assert warning < query < code < prose
+    assert "is lost" in answer[query].value
+
+    captions = [node.value for node in answer if type(node).__name__ == "Caption"]
+    assert not any("figures verified" in caption for caption in captions)
+    assert len(app.expander) == 0

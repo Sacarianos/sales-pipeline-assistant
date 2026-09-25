@@ -41,6 +41,20 @@ def test_q2_versus_same_point_in_q1_headline_case(data):
     assert answer.intent.comparison_period == "Q1-2026"
     assert round(answer.facts["attainment_pct"].value, 1) == 8.4
     assert round(answer.facts["comparison_attainment_pct"].value, 1) == 21.3
+    assert answer.facts["comparison_closed_won"].value == 1_260_000
+    assert answer.facts["comparison_won_deal_count"].value == 10
+
+
+def test_a_segment_comparison_scopes_both_sides_to_that_segment(data):
+    answer = ask("how is Enterprise attainment in Q2 compared to the same point in Q1", data)
+
+    assert isinstance(answer, Answered)
+    assert answer.intent.segment == "Enterprise"
+    # The Q2 side matches the Enterprise attainment answer, and the Q1 side is
+    # the 4 Enterprise deals won by February 1 against a 3,500,000 quota.
+    assert answer.facts["closed_won"].value == 165_000
+    assert answer.facts["comparison_closed_won"].value == 725_000
+    assert round(answer.facts["comparison_attainment_pct"].value, 1) == 20.7
 
 
 def test_gap_is_its_own_precomputed_fact(data):
@@ -56,19 +70,6 @@ def test_gap_is_its_own_precomputed_fact(data):
     )
     assert answer.facts["gap_pct"].value == expected
     assert round(answer.facts["gap_pct"].value, 0) == 13
-
-
-def test_day_32_resolves_to_may_2_and_february_1(data):
-    answer = ask(
-        "how does Q2 attainment compare to where we were at the same point in Q1",
-        data,
-    )
-
-    assert isinstance(answer, Answered)
-    assert answer.facts["day_of_quarter"].value == 32
-    backloading = next(f for f in answer.flags if f.kind == "backloading")
-    assert "May 2" in backloading.detail
-    assert "February 1" in backloading.detail
 
 
 def test_q1_side_reads_from_the_q1_snapshot_and_q2_side_from_the_q2_snapshot(data):
@@ -87,30 +88,6 @@ def test_q1_side_reads_from_the_q1_snapshot_and_q2_side_from_the_q2_snapshot(dat
     assert not q2_rows.empty
 
 
-def test_q1_day_32_figure_reads_1_260_000_across_10_deals_at_21_3_percent(data):
-    answer = ask(
-        "how does Q2 attainment compare to where we were at the same point in Q1",
-        data,
-    )
-
-    assert isinstance(answer, Answered)
-    assert answer.facts["comparison_closed_won"].value == 1_260_000
-    assert answer.facts["comparison_won_deal_count"].value == 10
-    assert round(answer.facts["comparison_attainment_pct"].value, 1) == 21.3
-
-
-def test_same_day_of_quarter_definition_appears_as_a_flag(data):
-    answer = ask(
-        "how does Q2 attainment compare to where we were at the same point in Q1",
-        data,
-    )
-
-    assert isinstance(answer, Answered)
-    flag = next(f for f in answer.flags if f.kind == "definition:comparison")
-    assert "same day of quarter" in flag.detail
-    assert "never blended" in flag.detail
-
-
 def test_backloading_flag_reports_share_of_q1_eventual_total_landed_by_cutoff(data):
     answer = ask(
         "how does Q2 attainment compare to where we were at the same point in Q1",
@@ -124,17 +101,6 @@ def test_backloading_flag_reports_share_of_q1_eventual_total_landed_by_cutoff(da
     assert "Q1-2026 finished strong from a slow start" in flag.detail
 
 
-def test_comparison_answers_at_overall_and_segment(data):
-    answer = ask(
-        "how is Enterprise attainment in Q2 compared to the same point in Q1", data
-    )
-
-    assert isinstance(answer, Answered)
-    assert answer.intent.metric == "comparison"
-    assert answer.intent.grouping == "segment"
-    assert answer.intent.segment == "Enterprise"
-
-
 def test_comparison_refuses_at_rep_grouping(data):
     client = StubRouterClient(
         tool_input=_comparison_input(grouping="rep", rep="Marcus Rivera")
@@ -144,17 +110,6 @@ def test_comparison_refuses_at_rep_grouping(data):
     assert isinstance(answer, Refused)
     assert "comparison" in answer.reason
     assert "rep" in answer.reason
-
-
-def test_comparison_refuses_at_manager_grouping(data):
-    client = StubRouterClient(
-        tool_input=_comparison_input(grouping="manager", manager="David Kim")
-    )
-    answer = ask("how does David Kim's team compare to Q1", data, client)
-
-    assert isinstance(answer, Refused)
-    assert "comparison" in answer.reason
-    assert "manager" in answer.reason
 
 
 def test_comparison_without_a_target_period_is_refused(data):

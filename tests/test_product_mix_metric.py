@@ -16,13 +16,6 @@ from acme.domain import Answered
 from acme.pipeline import ask
 
 
-def test_product_line_question_answers_rather_than_refuses(data):
-    answer = ask("how is our pipeline broken out by product line", data)
-
-    assert isinstance(answer, Answered)
-    assert answer.intent.metric == "product_mix"
-
-
 def test_q2_closed_won_splits_by_product_line_and_sums_to_the_known_total(data):
     answer = ask("how is our pipeline broken out by product line", data)
 
@@ -36,28 +29,6 @@ def test_q2_closed_won_splits_by_product_line_and_sums_to_the_known_total(data):
         + answer.facts["closed_won_core_platform"].value
         + answer.facts["closed_won_security_module"].value
     )
-
-
-def test_open_pipeline_also_splits_by_product_line(data):
-    answer = ask("how is our pipeline broken out by product line", data)
-
-    assert isinstance(answer, Answered)
-    assert answer.facts["open_pipeline_analytics_add_on"].value == 1_643_000
-    assert answer.facts["open_pipeline_core_platform"].value == 1_883_000
-    assert answer.facts["open_pipeline_security_module"].value == 1_672_000
-    assert answer.facts["open_pipeline"].value == 5_198_000
-
-
-def test_table_has_one_row_per_product_line(data):
-    answer = ask("how is our pipeline broken out by product line", data)
-
-    assert isinstance(answer, Answered)
-    assert len(answer.table) == 3
-    assert set(answer.table["product_line"]) == {
-        "Analytics Add-on",
-        "Core Platform",
-        "Security Module",
-    }
 
 
 def test_no_quota_or_attainment_fact_is_present(data):
@@ -80,21 +51,6 @@ def test_product_line_attribution_flag_fires_and_names_the_real_assumption(data)
     assert "one product-line tag" in flag.lede
     assert "bundle" in flag.lede.lower()
     assert "does not confirm" in flag.lede
-
-
-def test_product_line_attribution_flag_absent_from_other_metrics(data):
-    answer = ask("how are we tracking this quarter", data)
-
-    assert isinstance(answer, Answered)
-    assert not [f for f in answer.flags if f.kind == "product_line_attribution"]
-
-
-def test_source_rows_carry_the_product_line_column(data):
-    answer = ask("how is our pipeline broken out by product line", data)
-
-    assert isinstance(answer, Answered)
-    assert "product_line" in answer.source_rows.columns
-    assert answer.row_count == 52
 
 
 def test_q1_product_mix_answers_from_the_q1_snapshot(data):

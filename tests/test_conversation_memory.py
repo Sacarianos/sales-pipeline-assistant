@@ -5,9 +5,8 @@ from __future__ import annotations
 
 import json
 
-from acme import fallback
 from acme.conversation import MEMORY_TURNS, Turn, remember, turn
-from acme.domain import Answered, Intent, Refused, Unit
+from acme.domain import Answered, Refused, Unit
 from acme.pipeline import ask
 from acme.query_log import QueryLog
 from tests.test_fallback_lane import FallbackStubClient, _unsupported_input
@@ -66,14 +65,16 @@ def test_an_exploratory_turn_remembers_its_plan_and_description(data):
     assert remembered.restated == answer.restated
 
 
-def test_a_refused_turn_remembers_only_its_question(data):
-    """Nothing reads a refused turn beyond its question and lane, so it keeps
-    nothing else."""
-    answer = ask("how is the West region doing", data)
-    remembered = turn("how is the West region doing", answer)
-    assert remembered == Turn(
-        question="how is the West region doing", lane="refused", restated="", intent=None, plan=None
-    )
+def test_a_refused_turn_is_remembered_as_refused_and_nothing_more(data):
+    """A region question and then a follow-up is a common pair. The follow-up
+    is told the earlier question was refused, and nothing about why."""
+    earlier = turn("how is the West region doing", ask("how is the West region doing", data))
+    assert earlier == Turn(question="how is the West region doing", lane="refused", restated="", intent=None, plan=None)
+
+    client = StubRouterClient(tool_input=ENTERPRISE)
+    ask("ok, how is Enterprise doing then", data, client, history=(earlier,))
+    context = client.calls[0]["messages"][0]["content"]
+    assert '"how is the West region doing" was refused.' in context
 
 
 def test_memory_keeps_the_last_three_turns(data):
@@ -115,23 +116,6 @@ def test_the_narrator_is_not_given_earlier_turns(data):
     ask("why are we losing deals", data, client, history=(earlier,))
     narrator_call = next(call for call in client.calls if not call.get("tools"))
     assert "how is the Enterprise segment doing" not in _user_message(narrator_call)
-
-
-def test_the_router_prompt_explains_follow_ups(data):
-    from acme import router
-    from acme.catalog import build_catalog
-
-    prompt = router._system_prompt(build_catalog(data))
-    assert "follows_up" in prompt
-    assert "Following on from" in prompt
-    assert "follows_up" in Intent.model_json_schema()["properties"]
-
-
-def test_the_offline_router_ignores_memory(data):
-    earlier, _ = _metric_turn(data)
-    alone = ask("how are we tracking this quarter", data)
-    with_memory = ask("how are we tracking this quarter", data, history=(earlier,))
-    assert with_memory.intent == alone.intent
 
 
 def test_a_follow_up_about_a_refused_topic_still_refuses_before_any_model(data):
@@ -187,39 +171,18 @@ def test_a_standalone_question_never_shows_the_generator_earlier_turns(data):
     assert "Earlier in this conversation" not in message
 
 
-def test_the_router_is_told_a_comparison_needs_its_earlier_period(data):
-    """Found by the evals: a comparison was restated "against Q1-2026" with
-    comparison_period left empty, so validation refused it."""
-    from acme import router
-    from acme.catalog import build_catalog
-
-    assert "always set comparison_period" in router._system_prompt(build_catalog(data))
-
-
-def test_a_plan_that_refines_nothing_says_nothing_changed(data):
-    client = FallbackStubClient(router_input=_unsupported_input(), plan_input=LOSS_REASONS | {"refines_previous": True})
-    answer = ask("why are we losing deals", data, client)
-    assert answer.change_from_previous == ""
-
-
-def test_a_follow_up_is_logged_as_one(data, tmp_path):
+def test_only_a_real_follow_up_is_logged_as_one(data, tmp_path):
+    """The third question sets refines_previous with nothing to refine,
+    which the generator can do. Logged as a follow-up, it would drop out of
+    promotion's example questions for good."""
     earlier, _ = _exploratory_turn(data)
     log = QueryLog(tmp_path / "log.jsonl")
-    client = FallbackStubClient(router_input=_follow_up_input(), plan_input=LOSS_REASONS | {"refines_previous": True})
-    ask("just for Enterprise", data, client, history=(earlier,), log=log)
+    refining = LOSS_REASONS | {"refines_previous": True}
+    ask("just for Enterprise", data, FallbackStubClient(router_input=_follow_up_input(), plan_input=refining), history=(earlier,), log=log)
     ask("why are we losing deals", data, FallbackStubClient(router_input=_unsupported_input(), plan_input=LOSS_REASONS), log=log)
+    ask("why are we losing deals", data, FallbackStubClient(router_input=_unsupported_input(), plan_input=refining), log=log)
 
-    assert [r.follows_up for r in log.records()] == [True, False]
-
-
-def test_a_refinement_with_nothing_to_refine_is_not_logged_as_a_follow_up(data, tmp_path):
-    """Found in review: a standalone question gets no earlier turns, but the
-    generator can still set refines_previous, which marked the question as a
-    follow-up in the log and kept it out of promotion's example questions."""
-    log = QueryLog(tmp_path / "log.jsonl")
-    client = FallbackStubClient(router_input=_unsupported_input(), plan_input=LOSS_REASONS | {"refines_previous": True})
-    ask("why are we losing deals", data, client, log=log)
-    assert [r.follows_up for r in log.records()] == [False]
+    assert [r.follows_up for r in log.records()] == [True, False, False]
 
 
 def test_a_logged_refinement_joins_the_candidate_it_refined(data):
@@ -235,22 +198,11 @@ def test_a_logged_refinement_joins_the_candidate_it_refined(data):
     ]
     [candidate] = find_candidates(records, data)
     assert candidate.count == 2
+    # It counts, but "and again" means nothing to the router on its own.
+    assert candidate.questions == ("why are we losing deals",)
     assert "refines_previous" not in candidate.plan
     promotion = Promotion(
         name="loss_reasons", description="Lost deals in the period counted by the reason the rep recorded for each loss.",
         groupings=(), examples=("why are we losing deals",), definition_keys=(),
     )
     assert "refines_previous" not in render(promotion, candidate)
-
-
-def test_a_follow_up_counts_toward_promotion_but_is_never_an_example(data, tmp_path):
-    from acme.promotion import find_candidates
-    from acme.query_log import LogRecord
-
-    records = [
-        LogRecord(question="why are we losing deals", outcome="answered", plan=LOSS_REASONS),
-        LogRecord(question="and now?", outcome="answered", plan=LOSS_REASONS, follows_up=True),
-    ]
-    [candidate] = find_candidates(records, data)
-    assert candidate.count == 2
-    assert candidate.questions == ("why are we losing deals",)

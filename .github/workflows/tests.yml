@@ -1,0 +1,27 @@
+name: Tests
+
+# Every pull request, and every push to main. The tests use scripted model
+# clients, so no API key is needed. The evals under evals/ call the real
+# models and are run by hand, not here.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run the tests
+        run: pytest -q

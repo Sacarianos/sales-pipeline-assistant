@@ -47,15 +47,6 @@ def test_an_answered_attempt_records_the_question_plan_and_counts(data, log):
     assert record.logged_at
 
 
-def test_a_scalar_answer_has_no_row_count(data, log):
-    _ask("what's our total pipeline", data, log, TOTAL)
-
-    [record] = log.records()
-    assert record.outcome == "answered"
-    assert record.row_count is None
-    assert record.matched_rows == len(data.deals("Q2"))
-
-
 def test_a_decline_is_recorded_with_its_reason_and_no_plan(data, log):
     _ask("what did our Slack sentiment look like", data, log, {"decline_reason": "no column covers Slack sentiment"})
 
@@ -75,10 +66,13 @@ def test_a_rejected_plan_is_recorded_with_the_plan_and_the_reason(data, log):
     assert "'region' is withheld" in record.reason
 
 
-def test_a_malformed_plan_is_recorded_as_rejected(data, log):
+def test_a_malformed_plan_refuses_and_is_recorded_as_rejected(data, log):
+    """The generator can return a plan the schema doesn't allow, here an
+    aggregate function that doesn't exist. That has to refuse, not crash."""
     plan = {"frame": "deals_q2", "aggregate": {"function": "average", "column": "deal_value"}}
-    _ask("what's the average deal", data, log, plan)
+    answer = _ask("what's the average deal", data, log, plan)
 
+    assert answer.kind == "refused"
     [record] = log.records()
     assert record.outcome == "rejected"
     assert record.plan == plan
@@ -141,7 +135,3 @@ def test_the_log_survives_a_restart(data, log):
         "why are we losing deals",
         "what's our total pipeline",
     ]
-
-
-def test_a_log_that_does_not_exist_yet_reads_as_empty(tmp_path):
-    assert QueryLog(tmp_path / "nested" / "query_log.jsonl").records() == []

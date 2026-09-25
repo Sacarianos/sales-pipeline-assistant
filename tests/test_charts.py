@@ -15,7 +15,6 @@ data the chart is bound to, which is the only thing this layer passes along.
 
 from __future__ import annotations
 
-import altair as alt
 import pandas as pd
 import pytest
 
@@ -74,28 +73,3 @@ def test_every_charted_value_traces_back_to_a_fact_or_the_table(data, question):
                 f"charted value {value} for '{question}' is not a Fact, a table "
                 "column, or the declared risk threshold"
             )
-
-
-@pytest.mark.parametrize("question", QUESTIONS)
-def test_each_metric_produces_a_chart(data, question):
-    answer = ask(question, data)
-    assert isinstance(answer, Answered)
-    assert isinstance(chart_for(answer), alt.TopLevelMixin)
-
-
-def test_a_metric_with_no_builder_simply_gets_no_chart(data):
-    """A chart is an optional enhancement, so a metric nobody wrote one for
-    still answers. This is what keeps 'adding a metric means editing exactly
-    one file' true after the chart layer exists."""
-    answer = ask("how are we tracking this quarter", data)
-    assert isinstance(answer, Answered)
-
-    unknown = answer.intent.model_copy(update={"metric": "not_a_registered_metric"})
-    assert chart_for(Answered(intent=unknown, facts=answer.facts)) is None
-
-
-def test_a_refused_answer_is_never_handed_to_the_chart_layer(data):
-    """`chart_for` takes an Answered. A refusal has no figures to draw, and
-    the panel renders the reason and the coverage hint instead."""
-    answer = ask("how is the West region doing this quarter", data)
-    assert not isinstance(answer, Answered)

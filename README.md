@@ -252,7 +252,9 @@ pytest
 Tests go in through the same seam a user does (`ask(question, data, client)`)
 and assert on what reaches the screen, using a stub client shaped like
 `anthropic.Anthropic` rather than a live API key, so the suite is
-deterministic and free to run.
+deterministic and free to run. The app's own screens are tested the same
+way, by running `app.py` through Streamlit's test harness. GitHub Actions
+runs the suite on every pull request and every push to main.
 
 ## Evals
 

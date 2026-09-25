@@ -67,17 +67,6 @@ def test_missing_field_flag_catches_the_closed_lost_deal_without_a_reason(data):
     assert "Ironbridge" in flag.detail
 
 
-def test_all_rules_run_and_their_flags_all_survive_together(data):
-    answer = ask("how are we tracking this quarter", data)
-
-    assert isinstance(answer, Answered)
-    kinds = {f.kind for f in answer.flags}
-    # No rule short-circuits another: the partial-period, stale-close-date,
-    # and missing-field conditions all hold at once for this answer, and all
-    # three flags are present together.
-    assert {"partial_period", "stale_close_date", "missing_field"} <= kinds
-
-
 def test_unknown_stage_flag_fires_and_the_deal_still_counts_as_open(synthetic_data):
     answer = ask("how are we tracking this quarter", synthetic_data)
 

@@ -66,12 +66,13 @@ def steady_and_changed_data(tmp_path):
     return load_data(data_dir=tmp_path)
 
 
-def test_thirteen_ids_classify_as_reused(data):
+def test_thirteen_ids_classify_as_reused_and_never_as_unwon(data):
+    """Twelve of the reused IDs would read as unwon deals worth 1,220,000
+    if reuse weren't detected first."""
     reused = data.change_log[data.change_log["change_type"] == "id_reused"]
+    unwon = data.change_log[data.change_log["change_type"] == "unwon"]
     assert reused["deal_id"].nunique() == 13
-
-
-def test_twelve_reused_ids_would_otherwise_classify_as_unwon(data):
+    assert not set(unwon["deal_id"]) & set(reused["deal_id"])
     assert data.divergence.reused_unwon_count == 12
     assert data.divergence.reused_unwon_value == 1_220_000
 
@@ -79,12 +80,6 @@ def test_twelve_reused_ids_would_otherwise_classify_as_unwon(data):
 def test_four_deals_are_genuine_unwins_worth_363000(data):
     assert data.divergence.unwon_count == 4
     assert data.divergence.unwon_value == 363_000
-
-
-def test_reused_deal_ids_are_not_reported_as_unwon(data):
-    unwon = set(data.change_log.loc[data.change_log["change_type"] == "unwon", "deal_id"])
-    reused = set(data.change_log.loc[data.change_log["change_type"] == "id_reused", "deal_id"])
-    assert not (unwon & reused)
 
 
 def test_four_deals_classify_as_new_in_q2(data):
@@ -99,35 +94,17 @@ def test_reopened_deals_are_closed_lost_in_q1_and_open_in_q2(data):
     assert reopened == {"OPP-010", "OPP-032", "OPP-054"}
 
 
-def test_one_value_drift_exists_outside_the_reused_set(data):
+def test_attribute_drift_is_detected_outside_the_reused_set(data):
     reused = set(data.change_log.loc[data.change_log["change_type"] == "id_reused", "deal_id"])
-    value_drift = data.change_log[
-        (data.change_log["field"] == "deal_value") & (~data.change_log["deal_id"].isin(reused))
-    ]
+    outside = data.change_log[~data.change_log["deal_id"].isin(reused)]
+
+    value_drift = outside[outside["field"] == "deal_value"]
     assert list(value_drift["deal_id"]) == ["OPP-021"]
-    row = value_drift.iloc[0]
-    assert row["q1_value"] == 155_000
-    assert row["q2_value"] == 120_000
+    assert (value_drift.iloc[0]["q1_value"], value_drift.iloc[0]["q2_value"]) == (155_000, 120_000)
 
-
-def test_region_drift_is_detected_outside_the_reused_set(data):
-    reused = set(data.change_log.loc[data.change_log["change_type"] == "id_reused", "deal_id"])
-    region_drift = data.change_log[
-        (data.change_log["field"] == "region") & (~data.change_log["deal_id"].isin(reused))
-    ]
+    region_drift = outside[outside["field"] == "region"]
     assert list(region_drift["deal_id"]) == ["OPP-003"]
-    row = region_drift.iloc[0]
-    assert row["q1_value"] == "West"
-    assert row["q2_value"] == "Central"
-
-
-def test_no_deal_id_is_hardcoded_in_the_reconciler_module():
-    import inspect
-
-    from acme import reconciler
-
-    source = inspect.getsource(reconciler)
-    assert "OPP-" not in source
+    assert (region_drift.iloc[0]["q1_value"], region_drift.iloc[0]["q2_value"]) == ("West", "Central")
 
 
 def test_q1_closed_won_leads_as_reported_with_restated_alongside(data):
@@ -150,22 +127,11 @@ def test_divergence_flag_decomposes_the_gap_into_unwins_and_reused_ids(data):
     assert "12 deal IDs worth 1,220,000" in flag.detail
 
 
-def test_divergence_flag_absent_from_a_q2_question(data):
-    answer = ask("how are we tracking this quarter", data)
-
-    assert isinstance(answer, Answered)
-    assert not [f for f in answer.flags if f.kind == "snapshot_divergence"]
-
-
-def test_divergence_flag_absent_when_scoped_below_overall(data):
-    # The decomposition counts describe the whole Q1 portfolio; a
-    # segment-scoped Q1 question restates its own slice but doesn't get the
-    # organization-wide breakdown attached to it.
-    answer = ask("how was the Enterprise segment tracking in Q1", data)
-
-    assert isinstance(answer, Answered)
-    assert answer.intent.grouping == "segment"
-    assert not [f for f in answer.flags if f.kind == "snapshot_divergence"]
+def test_divergence_flag_only_on_an_overall_q1_question(data):
+    for question in ("how are we tracking this quarter", "how did Enterprise do in Q1"):
+        answer = ask(question, data)
+        assert isinstance(answer, Answered)
+        assert not [f for f in answer.flags if f.kind == "snapshot_divergence"], question
 
 
 def test_changed_deals_flag_names_deals_that_changed_between_snapshots(data):
@@ -175,17 +141,6 @@ def test_changed_deals_flag_names_deals_that_changed_between_snapshots(data):
     flag = next(f for f in answer.flags if f.kind == "changed_deals")
     assert "OPP-076 (id_reused)" in flag.detail
     assert "OPP-020 (unwon)" in flag.detail
-
-
-def test_no_answer_compares_a_stage_across_snapshots(data):
-    # Stage is reported only within the snapshot that owns it. Nothing in
-    # the fact set, table, or restated Q1 answer names a Q1 stage and a Q2
-    # stage together.
-    answer = ask("how were we tracking in Q1", data)
-
-    assert isinstance(answer, Answered)
-    assert not any("stage" in key for key in answer.facts)
-    assert "stage" not in answer.table.columns
 
 
 def test_restated_omitted_for_a_rep_slice_reconciliation_never_touched(

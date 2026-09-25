@@ -277,7 +277,11 @@ def attempt(
         reason = f"the query written for it didn't match the plan format: {exc.errors()[0]['msg']}"
         record("rejected", plan=raw, reason=reason)
         return Declined(reason)
-    follows_up = follows_up or plan.refines_previous
+    # The generator can set refines_previous even with no earlier plan to
+    # refine, and then the flag means nothing.
+    previous = last_plan(history)
+    refines = plan.refines_previous and previous is not None
+    follows_up = follows_up or refines
     if plan.decline_reason:
         record("declined", reason=plan.decline_reason)
         return Declined(plan.decline_reason)
@@ -292,8 +296,7 @@ def attempt(
     # What ran, as the next question in the conversation will see it, and
     # what changed from the plan this one refined.
     ran = plan.model_dump(exclude_defaults=True, exclude={"decline_reason", "refines_previous"})
-    previous = last_plan(history)
-    change = describe_change(previous, ran, schemas(data)) if plan.refines_previous and previous else ""
+    change = describe_change(previous, ran, schemas(data)) if refines else ""
 
     facts = facts_for(plan, outcome)
     table = display_table(outcome.value)

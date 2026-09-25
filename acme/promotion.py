@@ -90,6 +90,7 @@ def _normalize(raw: dict) -> tuple[dict, dict[str, str]] | None:
             "frame": SNAPSHOT_FRAMES.get(plan.frame, plan.frame),
             "filters": filters,
             "decline_reason": None,
+            "refines_previous": False,
         }
     )
     return general.model_dump(exclude_defaults=True), scope

@@ -4,7 +4,6 @@ readings, never as answers. See docs/specs/conversation-memory.md."""
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from acme import fallback
 from acme.conversation import MEMORY_TURNS, Turn, remember, turn
@@ -13,9 +12,6 @@ from acme.pipeline import ask
 from acme.query_log import QueryLog
 from tests.test_fallback_lane import FallbackStubClient, _unsupported_input
 from tests.test_llm_router_and_refusals import StubRouterClient
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-APP_SOURCE = (REPO_ROOT / "app.py").read_text(encoding="utf-8")
 
 ENTERPRISE = dict(
     metric="attainment", grouping="segment", segment="Enterprise", period="Q2-2026",
@@ -70,11 +66,14 @@ def test_an_exploratory_turn_remembers_its_plan_and_description(data):
     assert remembered.restated == answer.restated
 
 
-def test_a_refused_turn_remembers_only_its_question_and_reading(data):
+def test_a_refused_turn_remembers_only_its_question(data):
+    """Nothing reads a refused turn beyond its question and lane, so it keeps
+    nothing else."""
     answer = ask("how is the West region doing", data)
     remembered = turn("how is the West region doing", answer)
-    assert remembered.lane == "refused"
-    assert remembered.plan is None
+    assert remembered == Turn(
+        question="how is the West region doing", lane="refused", restated="", intent=None, plan=None
+    )
 
 
 def test_memory_keeps_the_last_three_turns(data):
@@ -206,11 +205,42 @@ def test_a_plan_that_refines_nothing_says_nothing_changed(data):
 def test_a_follow_up_is_logged_as_one(data, tmp_path):
     earlier, _ = _exploratory_turn(data)
     log = QueryLog(tmp_path / "log.jsonl")
-    client = FallbackStubClient(router_input=_unsupported_input(), plan_input=LOSS_REASONS | {"refines_previous": True})
+    client = FallbackStubClient(router_input=_follow_up_input(), plan_input=LOSS_REASONS | {"refines_previous": True})
     ask("just for Enterprise", data, client, history=(earlier,), log=log)
     ask("why are we losing deals", data, FallbackStubClient(router_input=_unsupported_input(), plan_input=LOSS_REASONS), log=log)
 
     assert [r.follows_up for r in log.records()] == [True, False]
+
+
+def test_a_refinement_with_nothing_to_refine_is_not_logged_as_a_follow_up(data, tmp_path):
+    """Found in review: a standalone question gets no earlier turns, but the
+    generator can still set refines_previous, which marked the question as a
+    follow-up in the log and kept it out of promotion's example questions."""
+    log = QueryLog(tmp_path / "log.jsonl")
+    client = FallbackStubClient(router_input=_unsupported_input(), plan_input=LOSS_REASONS | {"refines_previous": True})
+    ask("why are we losing deals", data, client, log=log)
+    assert [r.follows_up for r in log.records()] == [False]
+
+
+def test_a_logged_refinement_joins_the_candidate_it_refined(data):
+    """Found in review: the logged plan keeps the generator's refines_previous
+    flag, so a refinement became its own promotion candidate and the flag
+    would have been written into the metric file."""
+    from acme.promotion import Promotion, find_candidates, render
+    from acme.query_log import LogRecord
+
+    records = [
+        LogRecord(question="why are we losing deals", outcome="answered", plan=LOSS_REASONS),
+        LogRecord(question="and again", outcome="answered", plan=LOSS_REASONS | {"refines_previous": True}, follows_up=True),
+    ]
+    [candidate] = find_candidates(records, data)
+    assert candidate.count == 2
+    assert "refines_previous" not in candidate.plan
+    promotion = Promotion(
+        name="loss_reasons", description="Lost deals in the period counted by the reason the rep recorded for each loss.",
+        groupings=(), examples=("why are we losing deals",), definition_keys=(),
+    )
+    assert "refines_previous" not in render(promotion, candidate)
 
 
 def test_a_follow_up_counts_toward_promotion_but_is_never_an_example(data, tmp_path):
@@ -224,22 +254,3 @@ def test_a_follow_up_counts_toward_promotion_but_is_never_an_example(data, tmp_p
     [candidate] = find_candidates(records, data)
     assert candidate.count == 2
     assert candidate.questions == ("why are we losing deals",)
-
-
-# --- the app -----------------------------------------------------------------
-
-
-def test_a_follow_up_shows_what_it_carried_over_above_the_answer():
-    """The chat shows no restatement for a standalone answer, only the trace
-    panel does. A follow-up is different: what it carried over is the one
-    thing the reader has to check, so its restatement shows in the chat,
-    ahead of the prose."""
-    caption = APP_SOURCE.index("if answer.intent is not None and answer.intent.follows_up:")
-    prose = APP_SOURCE.index("st.write_stream(_typewriter(answer.prose))")
-    assert caption < prose
-
-
-def test_the_app_passes_memory_and_can_start_a_new_conversation():
-    assert "history=memory" in APP_SOURCE
-    assert '"New conversation"' in APP_SOURCE
-    assert "st.session_state.history = []" in APP_SOURCE

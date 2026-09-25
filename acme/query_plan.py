@@ -539,9 +539,14 @@ def describe_change(before: dict, after: dict, schemas: dict[str, FrameSchema]) 
         shape.append(
             "grouped by " + " and ".join(_human(c) for c in new.group_by) if new.group_by else "not grouped"
         )
-    if new.columns != old.columns and new.columns:
-        shape.append("showing " + ", ".join(_human(c) for c in new.columns))
-    if (new.sort_by, new.descending) != (old.sort_by, old.descending):
+    if new.aggregate is None and new.columns != old.columns:
+        # An empty column list means every column, which is a change too.
+        shown = ", ".join(_human(c) for c in new.columns) if new.columns else "every column"
+        shape.append("showing " + shown)
+    # The direction only means something on a sorted plan.
+    old_sort = (old.sort_by, old.descending) if old.sort_by is not None else None
+    new_sort = (new.sort_by, new.descending) if new.sort_by is not None else None
+    if new_sort != old_sort:
         shape.append(_sort_text(new, new_schema) if new.sort_by is not None else "not sorted")
     if new.limit != old.limit:
         shape.append(f"top {new.limit}" if new.limit is not None else "not limited")

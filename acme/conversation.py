@@ -28,20 +28,20 @@ class Turn:
     question: str
     lane: Lane
     restated: str
-    # The router's reading, without its restatement, for metric answers and
-    # for refusals that had one.
+    # The router's reading, without its restatement, for metric answers. A
+    # refusal keeps only its question and lane, since that's all the next
+    # question is told about it.
     intent: dict | None
     # The plan that ran, for exploratory answers.
     plan: dict | None
 
 
 def turn(question: str, answer: Answer) -> Turn:
+    if answer.kind == "refused":
+        return Turn(question=question, lane="refused", restated="", intent=None, plan=None)
     reading = None
     if answer.intent is not None:
         reading = answer.intent.model_dump(exclude_none=True, exclude={"restated", "unsupported_reason"})
-    if answer.kind == "refused":
-        restated = answer.intent.restated if answer.intent is not None else ""
-        return Turn(question=question, lane="refused", restated=restated, intent=reading, plan=None)
     return Turn(
         question=question,
         lane=answer.lane,

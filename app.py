@@ -402,13 +402,10 @@ with st.sidebar:
         f"<div class='side-sub'>As of {data.as_of} · routed by {config.ROUTER_MODEL}</div>",
         unsafe_allow_html=True,
     )
-    # Clears what the assistant remembers along with the transcript, so a new
-    # line of questions never follows on from an old one. In the sidebar, not
-    # beside the chat heading, since a taller heading pushes the chat input
-    # below the fold on a short window.
-    if st.button("New conversation", disabled=not st.session_state.history, width="stretch"):
-        st.session_state.history = []
-        st.rerun()
+    # "New conversation" goes here, but it's drawn at the end of the script,
+    # once this run's answer is in the history. Drawn here, it would still be
+    # disabled right after the first answer.
+    new_conversation_slot = st.empty()
     st.markdown(
         f"<div class='panel-heading'>What I can answer{_info('catalog')}</div>",
         unsafe_allow_html=True,
@@ -467,6 +464,15 @@ with chat_col:
         # same pass, so it already shows this answer, and rerunning would
         # redraw the prose the reader just watched type itself in.
         st.session_state.history.append((question, answer))
+
+# Clears what the assistant remembers along with the transcript, so a new line
+# of questions never follows on from an old one. In the sidebar, not beside
+# the chat heading, since a taller heading pushes the chat input below the
+# fold on a short window.
+with new_conversation_slot:
+    if st.button("New conversation", disabled=not st.session_state.history, width="stretch"):
+        st.session_state.history = []
+        st.rerun()
 
 with panel_col:
     st.subheader("Details")

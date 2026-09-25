@@ -300,3 +300,23 @@ def test_a_change_between_two_plans_reads_as_plain_english():
     assert describe_change(before, summed, SCHEMAS) == "Changed from your last query: now computes total deal value."
 
     assert describe_change(before, before, SCHEMAS) == "Same query as your last one."
+
+
+def test_a_listing_that_goes_back_to_every_column_says_so():
+    """Found in review: a refinement from two named columns back to all of
+    them showed every column but was described as the same query."""
+    from acme.query_plan import describe_change
+
+    narrow = {"frame": "deals", "columns": ["deal_id", "deal_value"]}
+    wide = {"frame": "deals"}
+    assert describe_change(narrow, wide, SCHEMAS) == "Changed from your last query: now showing every column."
+
+
+def test_a_sort_direction_on_an_unsorted_plan_is_not_a_change():
+    """Found in review: `descending` means nothing without `sort_by`, so a
+    flip between two unsorted plans was reported as a change."""
+    from acme.query_plan import describe_change
+
+    before = {"frame": "deals", "aggregate": {"function": "count"}}
+    after = {**before, "descending": False}
+    assert describe_change(before, after, SCHEMAS) == "Same query as your last one."

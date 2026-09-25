@@ -174,6 +174,24 @@ ahead of both. The region columns are withheld from every plan too, so a
 question like "which territory has the most pipeline" can't reach them just
 by avoiding the word.
 
+## Conversation memory
+
+A follow-up like "what about SMB?" or "just for Enterprise" is read in light
+of the last three questions. What the models remember is how each earlier
+question was read, the intent or the query plan, and never what it
+answered. The router and the generator have still never been shown a data
+figure, so memory gives them nothing to carry forward into a filter or a
+restatement.
+
+A follow-up still resolves to a complete reading and says so above the
+answer: "Following on from your last question, reading this as attainment
+for the SMB segment for Q2-2026." An exploratory refinement shows what
+changed from the last query, worked out by comparing the two plans in code.
+Refused topics are checked on each new question alone, so "what about the
+West?" refuses as region. "New conversation" in the sidebar clears the
+memory. The spec is
+[`docs/specs/conversation-memory.md`](docs/specs/conversation-memory.md).
+
 ## Promoting an exploratory plan
 
 A question that keeps landing in the exploratory lane probably deserves a

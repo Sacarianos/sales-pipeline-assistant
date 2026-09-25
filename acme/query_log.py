@@ -43,6 +43,9 @@ class LogRecord:
     # single-number answer has no row count.
     matched_rows: int | None = None
     row_count: int | None = None
+    # True when the question followed on from an earlier one, like "just for
+    # Enterprise". It still counts toward promotion but isn't an example.
+    follows_up: bool = False
     logged_at: str = field(default_factory=_now)
 
 

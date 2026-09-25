@@ -28,6 +28,7 @@ import streamlit as st
 
 from acme import config
 from acme.catalog import build_catalog
+from acme.conversation import remember, turn
 from acme.charts import chart_for
 from acme.domain import Answer, Answered, Flag, Refused
 from acme.query_log import QueryLog
@@ -171,14 +172,15 @@ STYLE = """
      chat input below the fold, which is the one thing a chat window must
      never do, and a fixed height also wastes the extra room a taller screen
      has. The Python side still passes a height, since st.container requires
-     one; this is what makes it adapt. The direct-child path is what keeps
-     the rule off the message containers nested inside the transcript, which
-     carry the same test id. The override is on `flex`, not `height`: the
-     container is a flex item whose size comes from flex-basis, which wins
-     over height on the main axis, so setting height alone does nothing. */
+     one; this is what makes it adapt. The rule matches the one wrapper
+     holding the keyed transcript, which keeps it off any other layout
+     wrapper added to the chat column later and off the message containers
+     nested inside the transcript. The override is on `flex`, not `height`: the container is a
+     flex item whose size comes from flex-basis, which wins over height on
+     the main axis, so setting height alone does nothing. */
   [data-testid="stColumn"]:has(#chat-anchor)
     > [data-testid="stVerticalBlock"]
-    > [data-testid="stLayoutWrapper"] {
+    > [data-testid="stLayoutWrapper"]:has(> .st-key-transcript) {
     flex: 0 0 calc(100vh - 20.5rem) !important;
     height: calc(100vh - 20.5rem) !important;
     min-height: 240px;
@@ -251,6 +253,12 @@ def _render_answer(answer: Answer, *, stream: bool) -> None:
             st.caption(answer.intent.restated)
         return
 
+    if answer.intent is not None and answer.intent.follows_up:
+        # A standalone answer leaves its restatement to the trace panel. A
+        # follow-up can't: what it carried over from the last question is
+        # the one thing the reader has to check, so it leads the answer.
+        st.caption(f"↳ {answer.intent.restated}")
+
     if answer.lane == "exploratory":
         # The warning comes first, above the answer, in the strongest
         # treatment the interface has. The query follows it straight away
@@ -260,6 +268,10 @@ def _render_answer(answer: Answer, *, stream: bool) -> None:
         st.markdown("<span class='exploratory-pill'>Exploratory</span>", unsafe_allow_html=True)
         st.error(EXPLORATORY_WARNING)
         st.markdown(f"**Query:** {_markdown_escape(answer.query_description)}")
+        if answer.change_from_previous:
+            # A refinement reads as a difference from the last query, so the
+            # reader checks one change instead of rereading the whole query.
+            st.caption(_markdown_escape(answer.change_from_previous))
         st.code(answer.expression, language="python", wrap_lines=True)
 
     if stream:
@@ -390,6 +402,10 @@ with st.sidebar:
         f"<div class='side-sub'>As of {data.as_of} · routed by {config.ROUTER_MODEL}</div>",
         unsafe_allow_html=True,
     )
+    # "New conversation" goes here, but it's drawn at the end of the script,
+    # once this run's answer is in the history. Drawn here, it would still be
+    # disabled right after the first answer.
+    new_conversation_slot = st.empty()
     st.markdown(
         f"<div class='panel-heading'>What I can answer{_info('catalog')}</div>",
         unsafe_allow_html=True,
@@ -418,7 +434,7 @@ with chat_col:
     # put a class on a column, so the column is selected by what it contains.
     st.markdown("<div id='chat-anchor'></div>", unsafe_allow_html=True)
     st.subheader("Chat")
-    transcript = st.container(height=TRANSCRIPT_HEIGHT, border=True)
+    transcript = st.container(height=TRANSCRIPT_HEIGHT, border=True, key="transcript")
 
     with transcript:
         for question, answer in st.session_state.history:
@@ -436,7 +452,10 @@ with chat_col:
         with transcript:
             with st.chat_message("user"):
                 st.write(question)
-            answer = ask(question, data, client, log=query_log)
+            # Earlier turns reach the models as readings, never as answers,
+            # so a follow-up like "what about SMB" has something to follow.
+            memory = remember(turn(q, a) for q, a in st.session_state.history)
+            answer = ask(question, data, client, log=query_log, history=memory)
             with st.chat_message("assistant"):
                 # Streamed only here, for the answer this run just computed.
                 # Every later rerun draws it from `history` above, instantly.
@@ -445,6 +464,15 @@ with chat_col:
         # same pass, so it already shows this answer, and rerunning would
         # redraw the prose the reader just watched type itself in.
         st.session_state.history.append((question, answer))
+
+# Clears what the assistant remembers along with the transcript, so a new line
+# of questions never follows on from an old one. In the sidebar, not beside
+# the chat heading, since a taller heading pushes the chat input below the
+# fold on a short window.
+with new_conversation_slot:
+    if st.button("New conversation", disabled=not st.session_state.history, width="stretch"):
+        st.session_state.history = []
+        st.rerun()
 
 with panel_col:
     st.subheader("Details")

@@ -9,8 +9,11 @@ early exit for a refusal.
 
 from __future__ import annotations
 
+from typing import Sequence
+
 from . import fallback
 from .catalog import Catalog, build_catalog
+from .conversation import Turn
 from .domain import Answer, Answered, Refused
 from .flags import evaluate as evaluate_flags
 from .loading import Data
@@ -35,9 +38,10 @@ def ask(
     client: object | None = None,
     *,
     log: QueryLog | None = None,
+    history: Sequence[Turn] = (),
 ) -> Answer:
     catalog = build_catalog(data)
-    routing = route(question, catalog, client)
+    routing = route(question, catalog, client, history)
     intent = routing.intent
 
     # The registry is consulted first and always wins: a question a metric
@@ -47,8 +51,16 @@ def ask(
     # a topic refused ahead of routing (region), reaches the fallback lane
     # at all.
     declined = None
-    if intent.is_unsupported() and not routing.refused_topic and intent.unsupported_kind != "ambiguous":
-        exploratory = fallback.attempt(question, data, client, router_mode=routing.mode, log=log)
+    # Only a question no metric covers goes to the exploratory lane. An
+    # ambiguous one, or one a metric covers at another grouping, refuses.
+    if intent.is_unsupported() and not routing.refused_topic and intent.unsupported_kind in (None, "no_metric"):
+        exploratory = fallback.attempt(
+            question, data, client,
+            router_mode=routing.mode, log=log, follows_up=intent.follows_up,
+            # The router decides whether a question follows on. A standalone
+            # question gets no earlier turns, so it can't inherit their scope.
+            history=history if intent.follows_up else (),
+        )
         if isinstance(exploratory, Answered):
             return exploratory
         declined = exploratory

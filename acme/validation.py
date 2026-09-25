@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .catalog import Catalog
-from .domain import UNSUPPORTED, Intent
+from .domain import Intent
 from .loading import Data
 from .periods import is_in_progress
 

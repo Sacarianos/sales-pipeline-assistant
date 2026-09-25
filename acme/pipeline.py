@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Sequence
 
 from . import fallback
-from .catalog import Catalog, build_catalog
+from .catalog import build_catalog
 from .conversation import Turn
 from .domain import Answer, Answered, Refused
 from .flags import evaluate as evaluate_flags

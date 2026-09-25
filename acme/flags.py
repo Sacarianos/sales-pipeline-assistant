@@ -20,7 +20,6 @@ so a mid-quarter gap is never read as a projection to quarter end.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Callable
 
 import pandas as pd
